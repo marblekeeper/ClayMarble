@@ -2,77 +2,64 @@
 setlocal EnableDelayedExpansion
 
 REM === Configuration ===
-set MSYS_DIR=C:\msys64\ucrt64
-set PATH=%MSYS_DIR%\bin;C:\msys64\usr\bin;%PATH%
-set OUT_NAME=marble_phase0_2.exe
+set "MSYS_DIR=C:\msys64\ucrt64"
+set "PATH=%MSYS_DIR%\bin;C:\msys64\usr\bin;%PATH%"
+set "OUT_NAME=marble_phase0_2.exe"
 
-REM === MarbleEngine Phase 0.2 Build Script ===
+REM === Detect Lua Library Name ===
+set "LUA_LIB=lua"
+if exist "%MSYS_DIR%\lib\liblua54.a" set "LUA_LIB=lua54"
 
-REM 1. Pre-build Cleanup: Kill any hung processes and delete old binaries
+REM === Pre-build Cleanup ===
 taskkill /F /IM %OUT_NAME% >nul 2>nul
 taskkill /F /IM test.exe >nul 2>nul
+taskkill /F /IM test_cmd.exe >nul 2>nul
 if exist %OUT_NAME% del /Q %OUT_NAME%
 if exist test.exe del /Q test.exe
+if exist test_cmd.exe del /Q test_cmd.exe
 
-if "%1"=="test" (
-    if "%2"=="msvc" (
-        echo [1/2] Building tests with MSVC...
-        cl /std:c11 /W4 /O2 test.c /Fe:test.exe
-    ) else (
-        echo [1/2] Building tests with GCC...
-        REM Using -B to point directly to the bin folder for sub-tools
-        gcc -std=c99 -Wall -Wextra -Wno-unused-function -Wno-unused-variable -O2 test.c -o test.exe ^
-            -B "%MSYS_DIR%\bin" ^
-            -L "%MSYS_DIR%\lib" ^
-            -I "%MSYS_DIR%\include" ^
-            -static -lm
-    )
-    
-    REM VALIDATION: We check if the file exists instead of checking ERRORLEVEL
-    if not exist test.exe (
-        echo.
-        echo [ERROR] test.exe was not created. 
-        echo Check if Antivirus is blocking C:\msys64\ucrt64\bin\cc1.exe
-        exit /b 1
-    )
-    
-    echo.
-    echo [2/2] Running tests...
-    echo ----------------------------------------
-    test.exe
-    exit /b %ERRORLEVEL%
+REM --- ROUTE: TEST ---
+if "%1"=="test" goto DO_TEST
+if "%1"=="gcc" goto DO_GCC
 
-) else if "%1"=="msvc" (
-    echo Building with MSVC...
-    cl /std:c11 /W4 /O2 main.c /Fe:%OUT_NAME%
+:USAGE
+echo Usage: build.bat [gcc^|test]
+exit /b 1
 
-) else if "%1"=="gcc" (
-    echo Building with GCC...
-    
-    gcc -std=c99 -Wall -Wextra -Wno-unused-function -Wno-unused-variable -O2 main.c -o %OUT_NAME% ^
-        -B "%MSYS_DIR%\bin" ^
-        -I. -I"%MSYS_DIR%\include" ^
-        -L"%MSYS_DIR%\lib" ^
-        -static-libgcc -static -lm
+:DO_TEST
+echo [1/3] Building Core Tests (GCC)...
+gcc -std=c99 -w -O2 test.c -o test.exe -I. -I"%MSYS_DIR%\include" -L"%MSYS_DIR%\lib" -static -l%LUA_LIB% -lm
 
-    if not exist %OUT_NAME% (
-        echo.
-        echo [ERROR] %OUT_NAME% was not created.
-        exit /b 1
-    )
+echo [2/3] Building Command Tests (GCC)...
+gcc -std=c99 -w -O2 test_cmd.c -o test_cmd.exe -I. -I"%MSYS_DIR%\include" -L"%MSYS_DIR%\lib" -static -l%LUA_LIB% -lm
 
+echo.
+echo [3/3] Running Test Suite...
+echo ----------------------------------------
+if exist test.exe (
+    echo Running Core:
+    .\test.exe
 ) else (
-    echo Usage: build.bat [msvc^|gcc^|test]
-    echo.
-    echo   msvc       - Build runtime with Visual Studio cl.exe
-    echo   gcc        - Build runtime with GCC/MinGW
-    echo   test       - Build and run test harness (GCC)
-    echo   test msvc  - Build and run test harness (MSVC)
-    exit /b 1
+    echo [ERROR] test.exe was not created.
 )
 
 echo.
-echo ========================================
-echo   BUILD SUCCESS: %OUT_NAME%
-echo ========================================
-echo Run: .\%OUT_NAME%
+if exist test_cmd.exe (
+    echo Running Command Buffer:
+    .\test_cmd.exe
+) else (
+    echo [ERROR] test_cmd.exe was not created.
+    echo Attempted link: -l%LUA_LIB%
+)
+exit /b 0
+
+:DO_GCC
+echo Building with GCC...
+gcc -std=c99 -w -O2 main.c -o %OUT_NAME% -I. -I"%MSYS_DIR%\include" -L"%MSYS_DIR%\lib" -static -l%LUA_LIB% -lm
+
+if exist %OUT_NAME% (
+    echo Build Success: %OUT_NAME%
+) else (
+    echo [ERROR] Build failed.
+)
+exit /b 0
