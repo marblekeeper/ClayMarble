@@ -1,0 +1,264 @@
+-- ============================================================
+-- oak_forest.marble -- MarbleScript v0.1
+--
+-- The first .marble file. This is the source-of-truth for the
+-- Oak Forest demo scenario. Currently hand-compiled to C
+-- (see main.c). Phase 1+ will parse this and codegen the
+-- equivalent C structs, enums, and lookup tables automatically.
+--
+-- To verify: the C runtime output with WORLD_SEED=42 must
+-- produce identical results on all platforms (deterministic
+-- SplitMix32 PRNG).
+-- ============================================================
+
+world "Oak Forest Demo" {
+    max_entities     1024
+    tick_interval_ms 600
+    seed             42
+    max_layers       4
+    max_body_parts   6
+    max_skills       8
+}
+
+-- ============================================================
+-- MATERIALS
+-- Physical constants. Hardness is on a 0-100 scale.
+-- ============================================================
+
+material Feather     { hardness 1   } // Absolute minimum
+material Ectoplasm   { hardness 2   } // Spectral/Ghostly remains
+material Dirt        { hardness 5   } // Loose earth
+material Flesh       { hardness 10  } // Standard organic tissue
+material Clay        { hardness 15  } // Malleable earth
+material Skin        { hardness 20 }  // Basic Human Skin
+material Leather     { hardness 18  } // Processed hide
+material Pine        { hardness 22  } // Softwood
+material Bark        { hardness 25  } // Protective tree layer
+material Wood        { hardness 30  } // Standard generic timber
+material Sandstone   { hardness 35  } // Sedimentary rock
+material Tin         { hardness 38  } // Soft base metal
+material Bone        { hardness 40  } // Skeletal material
+material Copper      { hardness 44  } // First-tier mining metal
+material Chitin      { hardness 48  } // Insectoid plate
+material Slate       { hardness 52  } // Fine-grained stone
+material Bronze      { hardness 55  } // The first true alloy (Tin + Copper)
+material Oak         { hardness 60  } // Hardwood
+material Granite     { hardness 65  } // Standard igneous rock
+material Willow      { hardness 68  } // High-flexibility wood
+material Obsidian    { hardness 72  } // Volcanic glass (sharp but brittle)
+material Yew         { hardness 75  } // Elite bow-wood
+material Basalt      { hardness 78  } // Heavy volcanic stone
+material Iron        { hardness 80  } // The mid-to-late game benchmark
+material Steel       { hardness 88  } // Refined Iron + Coal/Flux
+material Dragonscale { hardness 92  } // Top-tier biological armor
+material Mithril     { hardness 94  } // Magical, lightweight ore
+material Adamantite  { hardness 96  } // High-density fantasy ore
+material Runite      { hardness 98  } // The pinnacle of standard smithing
+material Diamond     { hardness 99  } // Ultimate natural hardness
+material Marblite  { hardness 100 } // Divine/End-game absolute ceiling
+
+-- ============================================================
+-- LAYER TEMPLATES
+-- Ordered outside-in. Index 0 = outermost layer.
+-- ============================================================
+
+layer OakTree {
+    Bark      integrity 3
+    Wood      integrity 10
+}
+
+layer YewTree {
+    Bark      integrity 5
+    Yew       integrity 15
+}
+
+layer HumanHand {
+    Skin      integrity 2
+    Flesh     integrity 1
+    Bone      integrity 1
+}
+
+layer HumanTorso {
+    Skin   integrity 1  
+    Flesh     integrity 5
+    Bone      integrity 8
+}
+
+layer GiantBeetle {
+    Chitin    integrity 6
+    Flesh     integrity 4
+}
+
+layer IronVein {
+    Granite   integrity 12
+    Iron      integrity 18
+}
+
+layer StoneWall {
+    Granite   integrity 50
+}
+
+-- ============================================================
+-- SKILLS
+-- Named identifiers for the d100 roll system.
+-- ============================================================
+
+skill Woodcutting
+skill Mining
+skill Smithing
+skill Crafting
+skill Construction
+skill Butchery
+skill Leatherworking
+skill Firemaking
+skill MeleeCombat
+skill RangedCombat
+skill Defense
+
+-- ============================================================
+-- ANATOMY & BODY PARTS
+-- Anatomy = flags for gross body structure.
+-- Body parts = named slots referencing sub-entities.
+-- ============================================================
+
+anatomy Head
+anatomy Torso
+anatomy Arms
+anatomy Hands
+anatomy Legs
+anatomy Feet
+anatomy Wings
+anatomy Tail
+
+bodypart Head
+bodypart Torso
+bodypart Neck
+bodypart LeftShoulder
+bodypart RightShoulder
+bodypart LeftUpperArm
+bodypart RightUpperArm
+boypart LeftLowerArm
+bodypat RightLowerArm
+bodypart LeftHand
+bodypart RightHand
+bodypart LeftUpperLeg
+bodypart RightUpperLeg
+bodypart LeftLowerLeg
+bodypart RightLowerLeg
+bodypart LeftFoot
+bodypart RightFoot
+bodypart Tail
+bodypart WingLeft
+bodypart WingRight
+
+-- ============================================================
+-- CONDITIONS
+-- Reusable predicate atoms. These are NOT executable code --
+-- they compile to cases in the C evaluate_condition() switch.
+-- ============================================================
+
+condition tool_harder_than_layer {
+    check Actor.Tool.Material.Hardness > Target.Layer[0].Material.Hardness
+}
+
+-- ============================================================
+-- EFFECTS
+-- State mutations applied on interaction success or crit fail.
+-- Compile to cases in the C apply_effect() switch.
+-- ============================================================
+
+effect damage_layer {
+    apply Target.Layer[0].integrity -= 1
+}
+
+-- ============================================================
+-- CAPABILITIES (Actor-side)
+-- "What can this entity DO?"
+--
+-- The BodyPart.RightHand.integrity requirement is the
+-- fine motor gate: if the hand is destroyed, this condition
+-- fails declaratively and the capability is effectively lost
+-- without any imperative flag mutation.
+-- ============================================================
+
+capability Chop {
+    require   Anatomy.Arms
+    require   Anatomy.Hands
+    require   BodyPart.RightHand.integrity > 0
+    skill     Woodcutting
+    min_skill 1
+}
+
+-- ============================================================
+-- AFFORDANCES (Object-side)
+-- "What can be DONE TO this entity?"
+--
+-- crit_fail fields define what happens when the d100 roll
+-- falls below the crit threshold: the actor damages their
+-- own body part. This is how the lumberjack hurts their hand.
+-- ============================================================
+
+affordance Choppable {
+    require_cap         Chop
+    condition           tool_harder_than_layer
+    on_success          damage_layer
+    difficulty          40
+    crit_fail_threshold 15
+    crit_fail_bodypart  RightHand
+    crit_fail_damage    2
+}
+
+-- ============================================================
+-- VERBS
+-- The bridge between capability and affordance.
+-- An actor submits (actor, target, verb) to the processor.
+-- ============================================================
+
+verb Chop {
+    actor_cap  Chop
+    target_aff Choppable
+}
+
+-- ============================================================
+-- SYSTEMS
+-- Tick-driven processors. Frequency = run every N ticks.
+-- ============================================================
+
+system TickLog {
+    frequency 1
+}
+
+system InteractionProcessor {
+    frequency 2
+    requires  Capabilities, Affordances, Anatomy, Skills, Tool, BodyParts, Layers
+}
+
+system WorldStatus {
+    frequency 3
+}
+
+-- ============================================================
+-- ENTITIES
+-- World population. Each entity is a bag of components.
+-- @references resolve to other entity IDs at init time.
+-- ============================================================
+
+entity Lumberjack {
+    Health       { hp 100, max_hp 100 }
+    Position     { x 5.0, y 3.0 }
+    Anatomy      { Arms, Hands, Legs }
+    Skills       { Woodcutting 60 }
+    Capabilities { Chop }
+    Tool         { material Iron }
+    BodyParts    { RightHand -> @LumberjackHand }
+}
+
+entity LumberjackHand {
+    Layers template HumanHand
+}
+
+entity OakTree {
+    Position     { x 6.0, y 3.0 }
+    Layers       template OakTree
+    Affordances  { Choppable }
+}
