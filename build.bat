@@ -46,7 +46,7 @@ exit /b 1
 
 :DO_UI_TEST
 echo [1/3] Building UI Test Runtime (SDL2 + Lua + EGL)...
-gcc -std=c99 -O2 test_ui.c bridge_engine.c -o %UI_OUT_NAME% ^
+gcc -std=c99 -O2 test_ui.c bridge_engine.c input_handler.c -o %UI_OUT_NAME% ^
     -I. -I"%MSYS_DIR%\include" -I"%MSYS_DIR%\include\SDL2" ^
     -L"%MSYS_DIR%\lib" ^
     -lmingw32 -lSDL2main -lSDL2 -l%LUA_LIB% -lm ^
@@ -81,7 +81,7 @@ echo ================================================
 echo SPRITE FONT EDITOR
 echo ================================================
 echo [1/3] Building...
-gcc -std=c99 -O2 test_ui.c bridge_engine.c -o %UI_OUT_NAME% ^
+gcc -std=c99 -O2 test_ui.c bridge_engine.c input_handler.c -o %UI_OUT_NAME% ^
     -I. -I"%MSYS_DIR%\include" -I"%MSYS_DIR%\include\SDL2" ^
     -L"%MSYS_DIR%\lib" ^
     -lmingw32 -lSDL2main -lSDL2 -l%LUA_LIB% -lm ^
@@ -190,7 +190,7 @@ REM === Build WebAssembly Application ===
 echo [3/3] Building WebAssembly application...
 if not exist "web" mkdir web
 
-call emcc test_ui.c bridge_engine.c -o web/index.html ^
+call emcc test_ui.c bridge_engine.c input_handler.c -o web/index.html ^
     -I. -I%LUA_DIR%\src ^
     %LUA_DIR%\src\liblua_wasm.a ^
     -s USE_SDL=2 ^
@@ -203,6 +203,7 @@ call emcc test_ui.c bridge_engine.c -o web/index.html ^
     --preload-file sprite_font_editor.lua ^
     --preload-file demo.lua ^
     --preload-file demo_complete.lua ^
+    --preload-file space_shooter.lua ^
     --preload-file Content@/Content ^
     -O2 ^
     -std=c99 ^

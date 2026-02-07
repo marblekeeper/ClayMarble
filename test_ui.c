@@ -16,6 +16,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "input_handler.h"
+
 /* --- Bridge Engine Imports --- */
 extern int InitEngine(void* windowHandle, int width, int height);
 extern void ShutdownEngine();
@@ -182,7 +184,7 @@ void LoadFontFromFile(const char* name) {
                 char* fileEnd = strchr(fileStart, '"');
                 if (fileEnd) {
                     int len = (int)(fileEnd - fileStart);
-                    if (len < sizeof(texFilename)) { strncpy(texFilename, fileStart, len); texFilename[len] = '\0'; }
+                    if (len < (int)sizeof(texFilename)) { strncpy(texFilename, fileStart, len); texFilename[len] = '\0'; }
                 }
             }
         }
@@ -303,7 +305,7 @@ static int l_draw_texture(lua_State* L) {
     int texId = (int)luaL_checknumber(L, 1);
     float x = (float)luaL_checknumber(L, 2), y = (float)luaL_checknumber(L, 3);
     float w = (float)luaL_checknumber(L, 4), h = (float)luaL_checknumber(L, 5);
-    unsigned int color = 0xFFFFFFFF; /* White */
+    unsigned int color = 0xFFFFFFFF;
     SetBatchTexture(texId);
     if (g_uiVertCount + 6 >= MAX_UI_VERTS) FlushBatch();
     UIVertex* v = &g_uiVerts[g_uiVertCount];
@@ -317,10 +319,7 @@ static int l_load_texture(lua_State* L) {
     const char* path = luaL_checkstring(L, 1);
     int w, h;
     int texId = LoadTexture(path, &w, &h);
-    if (texId == 0) {
-        lua_pushnil(L);
-        return 1;
-    }
+    if (texId == 0) { lua_pushnil(L); return 1; }
     lua_pushnumber(L, texId);
     lua_pushnumber(L, w);
     lua_pushnumber(L, h);
@@ -339,6 +338,13 @@ static int l_write_file(lua_State* L) {
     return 1;
 }
 
+/* --- Input bridge for Lua --- */
+static int l_getKeyState(lua_State* L) {
+    const char* name = luaL_checkstring(L, 1);
+    lua_pushinteger(L, Input_GetKeyState(name));
+    return 1;
+}
+
 void UpdateProjection(int w, int h) {
     float L = 0, R = (float)w, T = 0, B = (float)h;
     float ortho[16] = {2.0f/(R-L), 0, 0, 0, 0, 2.0f/(T-B), 0, 0, 0, 0, -1, 0, -(R+L)/(R-L), -(T+B)/(T-B), 0, 1};
@@ -347,12 +353,12 @@ void UpdateProjection(int w, int h) {
 }
 
 #ifdef __EMSCRIPTEN__
-/* Emscripten main loop function */
 void emscripten_main_loop() {
     EmscriptenLoopData* data = &g_loopData;
     
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
+        Input_ProcessEvent(&e);
         if (e.type == SDL_QUIT) {
             data->running = 0;
             emscripten_cancel_main_loop();
@@ -418,6 +424,8 @@ void emscripten_main_loop() {
 int main(int argc, char** argv) {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) return 1;
     
+    Input_Init();
+    
     int winW = 1024, winH = 768;
     SDL_Window* window = SDL_CreateWindow("Project Bridge Lua UI", 
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
@@ -447,9 +455,10 @@ int main(int argc, char** argv) {
     lua_pushcfunction(L, l_write_file); lua_setfield(L, -2, "writeFile");
     lua_pushcfunction(L, l_load_texture); lua_setfield(L, -2, "loadTexture");
     lua_pushcfunction(L, l_draw_texture); lua_setfield(L, -2, "drawTexture");
+    lua_pushcfunction(L, l_getKeyState); lua_setfield(L, -2, "getKeyState");
     lua_setglobal(L, "bridge");
 
-    const char* scriptName = (argc > 1) ? argv[1] : "demo";
+    const char* scriptName = (argc > 1) ? argv[1] : "space_shooter";
     char scriptPath[256];
     sprintf(scriptPath, "%s.lua", scriptName);
     if (luaL_dofile(L, "framework.lua") != LUA_OK) {
@@ -463,21 +472,18 @@ int main(int argc, char** argv) {
     printf("[System] Running: %s\n", scriptPath);
 
 #ifdef __EMSCRIPTEN__
-    /* Setup Emscripten loop data */
     g_loopData.window = window;
     g_loopData.L = L;
     g_loopData.winW = winW;
     g_loopData.winH = winH;
     g_loopData.running = 1;
-    
-    /* Start Emscripten main loop */
     emscripten_set_main_loop(emscripten_main_loop, 0, 1);
 #else
-    /* Traditional desktop main loop */
     int running = 1, mouseX = 0, mouseY = 0, mouseDown = 0;
     while (running) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
+            Input_ProcessEvent(&e);
             if (e.type == SDL_QUIT) running = 0;
             if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_RESIZED) {
                 winW = e.window.data1; winH = e.window.data2;
