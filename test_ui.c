@@ -1,7 +1,14 @@
-/* test_ui.c - COMPLETE WITH KEYBOARD SUPPORT */
+/* test_ui.c - EMSCRIPTEN COMPATIBLE VERSION */
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <emscripten/html5.h>
+#endif
+
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
+#ifndef __EMSCRIPTEN__
 #include <SDL2/SDL_syswm.h>
+#endif
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
@@ -48,6 +55,19 @@ int g_uiVertCount = 0;
 int g_whiteTexId = 0;
 int g_currentTexId = 0;
 Font g_activeFont = {0};
+
+/* Emscripten main loop state */
+#ifdef __EMSCRIPTEN__
+typedef struct {
+    SDL_Window* window;
+    lua_State* L;
+    int winW;
+    int winH;
+    int running;
+} EmscriptenLoopData;
+
+EmscriptenLoopData g_loopData = {0};
+#endif
 
 /* --- Embedded Fallback Font Data --- */
 const unsigned char FONT_DATA[] = {
@@ -169,38 +189,33 @@ void LoadFontFromFile(const char* name) {
         if (strstr(line, "char id=")) {
             int id = GetValue(line, "id");
             if (id >= 0 && id < 256) {
-                float x = (float)GetValue(line, "x"), y = (float)GetValue(line, "y");
-                float w = (float)GetValue(line, "width"), h = (float)GetValue(line, "height");
-                g_activeFont.glyphs[id].u0 = x; g_activeFont.glyphs[id].v0 = y;
-                g_activeFont.glyphs[id].u1 = w; g_activeFont.glyphs[id].v1 = h;
-                g_activeFont.glyphs[id].width = w; g_activeFont.glyphs[id].height = h;
-                g_activeFont.glyphs[id].advance = (float)GetValue(line, "xadvance");
-                g_activeFont.glyphs[id].xoff = (float)GetValue(line, "xoffset");
-                g_activeFont.glyphs[id].yoff = (float)GetValue(line, "yoffset");
+                int x = GetValue(line, "x"), y = GetValue(line, "y");
+                int width = GetValue(line, "width"), height = GetValue(line, "height");
+                int xoffset = GetValue(line, "xoffset"), yoffset = GetValue(line, "yoffset");
+                int xadvance = GetValue(line, "xadvance");
+                g_activeFont.glyphs[id].u0 = (float)x / g_activeFont.texWidth;
+                g_activeFont.glyphs[id].v0 = (float)y / g_activeFont.texHeight;
+                g_activeFont.glyphs[id].u1 = (float)(x + width) / g_activeFont.texWidth;
+                g_activeFont.glyphs[id].v1 = (float)(y + height) / g_activeFont.texHeight;
+                g_activeFont.glyphs[id].width = (float)width;
+                g_activeFont.glyphs[id].height = (float)height;
+                g_activeFont.glyphs[id].advance = (float)xadvance;
+                g_activeFont.glyphs[id].xoff = (float)xoffset;
+                g_activeFont.glyphs[id].yoff = (float)yoffset;
             }
         }
     }
     fclose(file);
-    if (strlen(texFilename) > 0) {
-        char texPath[256];
-        if (strstr(path, "Content/")) sprintf(texPath, "Content/%s", texFilename); else strcpy(texPath, texFilename);
+    if (texFilename[0] != '\0') {
+        char texPath[512];
+        sprintf(texPath, "Content/%s", texFilename);
         int w, h;
         g_activeFont.textureId = LoadTexture(texPath, &w, &h);
-        g_activeFont.texWidth = w; g_activeFont.texHeight = h;
-        if (g_activeFont.textureId == 0) { printf("[Error] Failed to load font texture: %s\n", texPath); GenerateDebugFont(); return; }
-        for (int i = 0; i < 256; i++) {
-            float x = g_activeFont.glyphs[i].u0, y = g_activeFont.glyphs[i].v0;
-            float w = g_activeFont.glyphs[i].u1, h = g_activeFont.glyphs[i].v1;
-            float epsilon = 0.5f;
-            g_activeFont.glyphs[i].u0 = (x + epsilon) / g_activeFont.texWidth;
-            g_activeFont.glyphs[i].v0 = (y + epsilon) / g_activeFont.texHeight;
-            g_activeFont.glyphs[i].u1 = (x + w - epsilon) / g_activeFont.texWidth;
-            g_activeFont.glyphs[i].v1 = (y + h - epsilon) / g_activeFont.texHeight;
-            g_activeFont.glyphs[i].width = w; g_activeFont.glyphs[i].height = h;
-        }
-        g_activeFont.loaded = 1;
-        printf("[System] Font Loaded Successfully.\n");
-    } else GenerateDebugFont();
+        g_activeFont.texWidth = w;
+        g_activeFont.texHeight = h;
+        if (g_activeFont.textureId) { g_activeFont.loaded = 1; printf("[System] Font texture loaded: %s\n", texPath); }
+        else { printf("[System] Font texture failed to load: %s\n", texPath); GenerateDebugFont(); }
+    } else { printf("[System] No texture filename found\n"); GenerateDebugFont(); }
 }
 
 static int l_draw_rect(lua_State* L) {
@@ -220,17 +235,20 @@ static int l_draw_rect(lua_State* L) {
 
 static int l_draw_text(lua_State* L) {
     if (!g_activeFont.loaded) return 0;
+    const char* text = luaL_checkstring(L, 1);
+    float x = (float)luaL_checknumber(L, 2), y = (float)luaL_checknumber(L, 3);
+    int r = (int)luaL_checknumber(L, 4), g = (int)luaL_checknumber(L, 5);
+    int b = (int)luaL_checknumber(L, 6), a = (int)luaL_checknumber(L, 7);
+    unsigned int color = (a << 24) | (b << 16) | (g << 8) | r;
     SetBatchTexture(g_activeFont.textureId);
-    float startX = (float)luaL_checknumber(L, 1), y = (float)luaL_checknumber(L, 2);
-    const char* text = luaL_checkstring(L, 3);
-    int r = (int)luaL_checknumber(L, 4), g = (int)luaL_checknumber(L, 5), b = (int)luaL_checknumber(L, 6);
-    unsigned int color = (255 << 24) | (b << 16) | (g << 8) | r;
-    float curX = startX;
+    float curX = x, curY = y;
     for (int i = 0; text[i] != '\0'; i++) {
         unsigned char c = (unsigned char)text[i];
+        if (c == '\n') { curX = x; curY += g_activeFont.glyphs[(int)'A'].height; continue; }
         Glyph* glyph = &g_activeFont.glyphs[c];
         if (g_uiVertCount + 6 >= MAX_UI_VERTS) FlushBatch();
-        float gx = curX + glyph->xoff, gy = y + glyph->yoff, gw = glyph->width, gh = glyph->height;
+        float gx = curX + glyph->xoff, gy = curY + glyph->yoff;
+        float gw = glyph->width, gh = glyph->height;
         UIVertex* v = &g_uiVerts[g_uiVertCount];
         v[0] = (UIVertex){gx, gy, glyph->u0, glyph->v0, color};
         v[1] = (UIVertex){gx+gw, gy, glyph->u1, glyph->v0, color};
@@ -328,15 +346,91 @@ void UpdateProjection(int w, int h) {
     UpdateViewport(w, h);
 }
 
+#ifdef __EMSCRIPTEN__
+/* Emscripten main loop function */
+void emscripten_main_loop() {
+    EmscriptenLoopData* data = &g_loopData;
+    
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+        if (e.type == SDL_QUIT) {
+            data->running = 0;
+            emscripten_cancel_main_loop();
+            return;
+        }
+        if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_RESIZED) {
+            data->winW = e.window.data1;
+            data->winH = e.window.data2;
+            UpdateProjection(data->winW, data->winH);
+        }
+        if (e.type == SDL_KEYDOWN) {
+            const char* keyName = SDL_GetKeyName(e.key.keysym.sym);
+            lua_getglobal(data->L, "HandleKeyPress");
+            if (lua_isfunction(data->L, -1)) {
+                char simpleName[32] = {0};
+                if (strcmp(keyName, "Up") == 0) strcpy(simpleName, "up");
+                else if (strcmp(keyName, "Down") == 0) strcpy(simpleName, "down");
+                else if (strcmp(keyName, "Left") == 0) strcpy(simpleName, "left");
+                else if (strcmp(keyName, "Right") == 0) strcpy(simpleName, "right");
+                else if (strcmp(keyName, "Space") == 0) strcpy(simpleName, "space");
+                else if (strlen(keyName) == 1) { simpleName[0] = keyName[0]; simpleName[1] = '\0'; }
+                else strncpy(simpleName, keyName, sizeof(simpleName) - 1);
+                lua_pushstring(data->L, simpleName);
+                if (lua_pcall(data->L, 1, 0, 0) != LUA_OK) {
+                    printf("HandleKeyPress Error: %s\n", lua_tostring(data->L, -1));
+                    lua_pop(data->L, 1);
+                }
+            } else {
+                lua_pop(data->L, 1);
+            }
+        }
+    }
+    
+    int mouseX = 0, mouseY = 0;
+    Uint32 buttons = SDL_GetMouseState(&mouseX, &mouseY);
+    int mouseDown = (buttons & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
+    
+    lua_getglobal(data->L, "UpdateUI");
+    lua_pushnumber(data->L, mouseX);
+    lua_pushnumber(data->L, mouseY);
+    lua_pushboolean(data->L, mouseDown);
+    lua_pushnumber(data->L, data->winW);
+    lua_pushnumber(data->L, data->winH);
+    if (lua_pcall(data->L, 5, 0, 0) != LUA_OK) {
+        printf("Lua Update Error: %s\n", lua_tostring(data->L, -1));
+        lua_pop(data->L, 1);
+    }
+    
+    ClearScreen(0.1f, 0.1f, 0.15f, 1.0f);
+    g_uiVertCount = 0;
+    
+    lua_getglobal(data->L, "DrawUI");
+    if (lua_pcall(data->L, 0, 0, 0) != LUA_OK) {
+        printf("Lua Draw Error: %s\n", lua_tostring(data->L, -1));
+        lua_pop(data->L, 1);
+    }
+    
+    FlushBatch();
+    BridgeSwapBuffers();
+}
+#endif
+
 int main(int argc, char** argv) {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) return 1;
+    
     int winW = 1024, winH = 768;
-    SDL_Window* window = SDL_CreateWindow("Project Bridge Lua UI", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
+    SDL_Window* window = SDL_CreateWindow("Project Bridge Lua UI", 
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
         winW, winH, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+    
+    void* nativeWindow = NULL;
+#ifndef __EMSCRIPTEN__
     SDL_SysWMinfo wmInfo;
     SDL_VERSION(&wmInfo.version);
     SDL_GetWindowWMInfo(window, &wmInfo);
-    void* nativeWindow = (void*)wmInfo.info.win.window;
+    nativeWindow = (void*)wmInfo.info.win.window;
+#endif
+    
     InitEngine(nativeWindow, winW, winH);
     g_whiteTexId = CreateWhiteTexture();
     g_currentTexId = g_whiteTexId;
@@ -358,10 +452,28 @@ int main(int argc, char** argv) {
     const char* scriptName = (argc > 1) ? argv[1] : "demo";
     char scriptPath[256];
     sprintf(scriptPath, "%s.lua", scriptName);
-    if (luaL_dofile(L, "framework.lua") != LUA_OK) { printf("Error loading framework: %s\n", lua_tostring(L, -1)); return 1; }
-    if (luaL_dofile(L, scriptPath) != LUA_OK) { printf("Error loading %s: %s\n", scriptPath, lua_tostring(L, -1)); return 1; }
+    if (luaL_dofile(L, "framework.lua") != LUA_OK) {
+        printf("Error loading framework: %s\n", lua_tostring(L, -1));
+        return 1;
+    }
+    if (luaL_dofile(L, scriptPath) != LUA_OK) {
+        printf("Error loading %s: %s\n", scriptPath, lua_tostring(L, -1));
+        return 1;
+    }
     printf("[System] Running: %s\n", scriptPath);
 
+#ifdef __EMSCRIPTEN__
+    /* Setup Emscripten loop data */
+    g_loopData.window = window;
+    g_loopData.L = L;
+    g_loopData.winW = winW;
+    g_loopData.winH = winH;
+    g_loopData.running = 1;
+    
+    /* Start Emscripten main loop */
+    emscripten_set_main_loop(emscripten_main_loop, 0, 1);
+#else
+    /* Traditional desktop main loop */
     int running = 1, mouseX = 0, mouseY = 0, mouseDown = 0;
     while (running) {
         SDL_Event e;
@@ -402,6 +514,11 @@ int main(int argc, char** argv) {
         BridgeSwapBuffers();
         SDL_Delay(16);
     }
-    ShutdownEngine(); lua_close(L); SDL_DestroyWindow(window); SDL_Quit();
+#endif
+
+    ShutdownEngine();
+    lua_close(L);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
     return 0;
 }

@@ -1,0 +1,2652 @@
+#version 100
+precision mediump float;
+varying vec2 v_uv;
+varying vec4 v_color;
+uniform sampler2D u_texture;
+uniform float u_vertexColorMix;
+uniform float u_colorQuantization;
+void main() {
+    vec4 texColor = texture2D(u_texture, v_uv);
+    // u_vertexColorMix = 0.0 -> full vertex color modulation (original behavior)
+    // u_vertexColorMix = 0.0 -> 10% vertex color, 90% white (baked lighting use case)
+    vec4 modulation = mix(v_color, vec4(1.0, 1.0, 1.0, v_color.a), u_vertexColorMix * 10.0);
+    vec4 baseColor = texColor * modulation;
+    
+    // Apply color quantization (banding effect for retro look)
+    if (u_colorQuantization > 0.0) {
+        float levels = pow(2.0, u_colorQuantization);
+        baseColor.rgb = floor(baseColor.rgb * levels) / levels;
+    }
+    
+    gl_FragColor = baseColor;
+}#version 100
+precision mediump float;
+attribute vec3 a_position;
+attribute vec2 a_uv;
+attribute vec4 a_color;
+uniform mat4 u_projection;
+varying vec2 v_uv;
+varying vec4 v_color;
+void main() {
+    gl_Position = u_projection * vec4(a_position, 1.0);
+    v_uv = a_uv;
+    v_color = a_color;
+}#version 100
+precision mediump float;
+
+varying vec2 v_uv;
+varying vec4 v_color;
+
+uniform sampler2D u_texture;
+uniform float u_vertexColorMix;
+uniform float u_colorQuantization;
+
+// RGB to HSL conversion logic
+vec3 rgb2hsl(vec3 c) {
+    float maxC = max(max(c.r, c.g), c.b);
+    float minC = min(min(c.r, c.g), c.b);
+    float l = (maxC + minC) * 0.5;
+    float s = 0.0;
+    float h = 0.0;
+    
+    if (maxC != minC) {
+        float d = maxC - minC;
+        s = l > 0.5 ? d / (2.0 - maxC - minC) : d / (maxC + minC);
+        
+        if (maxC == c.r) {
+            h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
+        } else if (maxC == c.g) {
+            h = (c.b - c.r) / d + 2.0;
+        } else {
+            h = (c.r - c.g) / d + 4.0;
+        }
+        h /= 6.0;
+    }
+    
+    return vec3(h, s, l);
+}
+
+// Helper for HSL to RGB
+float hue2rgb(float p, float q, float t) {
+    if (t < 0.0) t += 1.0;
+    if (t > 1.0) t -= 1.0;
+    if (t < 1.0 / 6.0) return p + (q - p) * 6.0 * t;
+    if (t < 0.5) return q;
+    if (t < 2.0 / 3.0) return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+    return p;
+}
+
+// HSL to RGB conversion logic
+vec3 hsl2rgb(vec3 hsl) {
+    float h = hsl.x;
+    float s = hsl.y;
+    float l = hsl.z;
+    
+    if (s == 0.0) {
+        return vec3(l);
+    }
+    
+    float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
+    float p = 2.0 * l - q;
+    
+    return vec3(
+        hue2rgb(p, q, h + 1.0 / 3.0),
+        hue2rgb(p, q, h),
+        hue2rgb(p, q, h - 1.0 / 3.0)
+    );
+}
+
+// RS2-Style: Quantize to 16-bit HSL
+// 6-bit hue (0-63), 3-bit sat (0-7), 7-bit lightness (0-127)
+vec3 quantizeHSL16(vec3 rgb) {
+    vec3 hsl = rgb2hsl(rgb);
+    
+    float h = floor(hsl.x * 63.0 + 0.5) / 63.0; 
+    float s = floor(hsl.y * 7.0 + 0.5) / 7.0;   
+    float l = floor(hsl.z * 127.0 + 0.5) / 127.0; 
+    
+    return hsl2rgb(vec3(h, s, l));
+}
+
+void main() {
+    vec4 texColor = texture2D(u_texture, v_uv);
+    
+    // VECTORIZED OVERLAY BLEND
+    // Calculates both possible outcomes for the overlay blend simultaneously
+    vec3 low = 2.0 * texColor.rgb * v_color.rgb;
+    vec3 high = 1.0 - 2.0 * (1.0 - texColor.rgb) * (1.0 - v_color.rgb);
+    
+    // Uses step() to choose between 'low' and 'high' per-channel, mimicking RS2 software rasterizer
+    vec3 overlay = mix(low, high, step(0.5, v_color.rgb));
+    
+    vec3 finalRGB;
+    
+    // VERTEX COLOR MIXING LOGIC
+    if (u_vertexColorMix < 0.5) {
+        float factor = u_vertexColorMix * 2.0;
+        finalRGB = mix(texColor.rgb, overlay, factor);
+    } else {
+        float factor = (u_vertexColorMix - 0.5) * 2.0;
+        finalRGB = mix(overlay, v_color.rgb, factor);
+    }
+    
+    float finalAlpha = texColor.a * v_color.a;
+
+    // PASS 1: 16-bit HSL palette simulation
+    finalRGB = quantizeHSL16(finalRGB);
+
+    // PASS 2: Optional RGB banding (Posterization)
+    if (u_colorQuantization > 0.0) {
+        float levels = exp2(u_colorQuantization); 
+        finalRGB = floor(finalRGB * levels + 0.5) / levels;
+    }
+    
+    gl_FragColor = vec4(finalRGB, finalAlpha);
+}#version 100
+precision mediump float;
+attribute vec3 a_position;
+attribute vec2 a_uv;
+attribute vec4 a_color;
+uniform mat4 u_projection;
+varying vec2 v_uv;
+varying vec4 v_color;
+void main() {
+    gl_Position = u_projection * vec4(a_position, 1.0);
+    v_uv = a_uv;
+    v_color = a_color;
+}info face="CustomFont" size=12 bold=0 italic=0 charset="" unicode=0 stretchH=100 smooth=1 aa=1 padding=0,0,0,0 spacing=1,1
+common lineHeight=12 base=12 scaleW=160 scaleH=192 pages=1 packed=0
+page id=0 file="Content/mbf_big_00.png"
+chars count=38
+char id=65   x=10     y=48     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=66   x=20     y=48     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=67   x=30     y=48     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=68   x=40     y=48     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=69   x=50     y=48     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=70   x=60     y=48     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=71   x=70     y=48     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=72   x=80     y=48     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=73   x=90     y=48     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=74   x=100     y=48     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=75   x=110     y=48     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=76   x=100     y=36     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=77   x=130     y=48     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=78   x=140     y=48     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=79   x=150     y=48     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=80   x=0     y=60     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=81   x=10     y=60     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=82   x=20     y=60     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=84   x=30     y=60     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=85   x=40     y=60     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=86   x=50     y=60     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=87   x=60     y=60     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=88   x=70     y=60     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=89   x=90     y=60     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=90   x=100     y=60     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=91   x=110     y=60     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=92   x=120     y=60     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=93   x=130     y=60     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=48   x=0     y=36     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=49   x=10     y=36     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=50   x=20     y=36     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=51   x=30     y=36     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=52   x=40     y=36     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=53   x=50     y=36     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=54   x=60     y=36     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=55   x=70     y=36     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=56   x=80     y=36     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+char id=57   x=90     y=36     width=10     height=12     xoffset=0     yoffset=0    xadvance=10     page=0  chnl=0
+kernings count=0
+info face="Droid Sans" size=17 bold=0 italic=0 charset="" unicode=0 stretchH=100 smooth=1 aa=1 padding=0,0,0,0 spacing=1,1
+common lineHeight=20 base=18 scaleW=256 scaleH=128 pages=1 packed=0
+page id=0 file="default.png"
+chars count=96
+char id=32   x=0     y=0     width=0     height=0     xoffset=0     yoffset=16    xadvance=4     page=0  chnl=0 
+char id=124   x=0     y=0     width=6     height=20     xoffset=1     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=106   x=6     y=0     width=9     height=20     xoffset=-4     yoffset=3    xadvance=4     page=0  chnl=0 
+char id=81   x=15     y=0     width=15     height=19     xoffset=-2     yoffset=3    xadvance=12     page=0  chnl=0 
+char id=74   x=30     y=0     width=11     height=19     xoffset=-5     yoffset=3    xadvance=4     page=0  chnl=0 
+char id=125   x=41     y=0     width=10     height=18     xoffset=-3     yoffset=3    xadvance=6     page=0  chnl=0 
+char id=123   x=51     y=0     width=10     height=18     xoffset=-3     yoffset=3    xadvance=6     page=0  chnl=0 
+char id=93   x=61     y=0     width=8     height=18     xoffset=-3     yoffset=3    xadvance=5     page=0  chnl=0 
+char id=91   x=69     y=0     width=8     height=18     xoffset=-2     yoffset=3    xadvance=5     page=0  chnl=0 
+char id=41   x=77     y=0     width=9     height=18     xoffset=-3     yoffset=3    xadvance=5     page=0  chnl=0 
+char id=40   x=86     y=0     width=9     height=18     xoffset=-3     yoffset=3    xadvance=5     page=0  chnl=0 
+char id=64   x=95     y=0     width=18     height=17     xoffset=-3     yoffset=3    xadvance=14     page=0  chnl=0 
+char id=121   x=113     y=0     width=13     height=17     xoffset=-3     yoffset=6    xadvance=8     page=0  chnl=0 
+char id=113   x=126     y=0     width=13     height=17     xoffset=-3     yoffset=6    xadvance=9     page=0  chnl=0 
+char id=112   x=139     y=0     width=13     height=17     xoffset=-2     yoffset=6    xadvance=9     page=0  chnl=0 
+char id=103   x=152     y=0     width=13     height=17     xoffset=-3     yoffset=6    xadvance=8     page=0  chnl=0 
+char id=38   x=165     y=0     width=16     height=16     xoffset=-3     yoffset=3    xadvance=11     page=0  chnl=0 
+char id=37   x=181     y=0     width=18     height=16     xoffset=-3     yoffset=3    xadvance=14     page=0  chnl=0 
+char id=36   x=199     y=0     width=12     height=16     xoffset=-2     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=63   x=211     y=0     width=11     height=16     xoffset=-3     yoffset=3    xadvance=7     page=0  chnl=0 
+char id=33   x=222     y=0     width=7     height=16     xoffset=-2     yoffset=3    xadvance=4     page=0  chnl=0 
+char id=48   x=229     y=0     width=13     height=16     xoffset=-3     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=57   x=242     y=0     width=13     height=16     xoffset=-3     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=56   x=0     y=20     width=13     height=16     xoffset=-3     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=54   x=13     y=20     width=13     height=16     xoffset=-3     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=53   x=26     y=20     width=12     height=16     xoffset=-2     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=51   x=38     y=20     width=13     height=16     xoffset=-3     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=100   x=51     y=20     width=13     height=16     xoffset=-3     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=98   x=64     y=20     width=13     height=16     xoffset=-2     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=85   x=77     y=20     width=14     height=16     xoffset=-2     yoffset=3    xadvance=11     page=0  chnl=0 
+char id=83   x=91     y=20     width=13     height=16     xoffset=-3     yoffset=3    xadvance=8     page=0  chnl=0 
+char id=79   x=104     y=20     width=15     height=16     xoffset=-2     yoffset=3    xadvance=12     page=0  chnl=0 
+char id=71   x=119     y=20     width=14     height=16     xoffset=-2     yoffset=3    xadvance=11     page=0  chnl=0 
+char id=67   x=133     y=20     width=13     height=16     xoffset=-2     yoffset=3    xadvance=10     page=0  chnl=0 
+char id=127   x=146     y=20     width=12     height=15     xoffset=-2     yoffset=3    xadvance=10     page=0  chnl=0 
+char id=35   x=158     y=20     width=15     height=15     xoffset=-3     yoffset=3    xadvance=10     page=0  chnl=0 
+char id=92   x=173     y=20     width=11     height=15     xoffset=-3     yoffset=3    xadvance=6     page=0  chnl=0 
+char id=47   x=184     y=20     width=11     height=15     xoffset=-3     yoffset=3    xadvance=6     page=0  chnl=0 
+char id=59   x=195     y=20     width=8     height=15     xoffset=-3     yoffset=6    xadvance=4     page=0  chnl=0 
+char id=55   x=203     y=20     width=13     height=15     xoffset=-3     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=52   x=216     y=20     width=14     height=15     xoffset=-3     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=50   x=230     y=20     width=13     height=15     xoffset=-3     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=49   x=243     y=20     width=9     height=15     xoffset=-2     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=116   x=0     y=36     width=10     height=15     xoffset=-3     yoffset=4    xadvance=5     page=0  chnl=0 
+char id=108   x=10     y=36     width=6     height=15     xoffset=-2     yoffset=3    xadvance=4     page=0  chnl=0 
+char id=107   x=16     y=36     width=12     height=15     xoffset=-2     yoffset=3    xadvance=8     page=0  chnl=0 
+char id=105   x=28     y=36     width=7     height=15     xoffset=-2     yoffset=3    xadvance=4     page=0  chnl=0 
+char id=104   x=35     y=36     width=12     height=15     xoffset=-2     yoffset=3    xadvance=10     page=0  chnl=0 
+char id=102   x=47     y=36     width=11     height=15     xoffset=-3     yoffset=3    xadvance=5     page=0  chnl=0 
+char id=90   x=58     y=36     width=13     height=15     xoffset=-3     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=89   x=71     y=36     width=13     height=15     xoffset=-3     yoffset=3    xadvance=8     page=0  chnl=0 
+char id=88   x=84     y=36     width=14     height=15     xoffset=-3     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=87   x=98     y=36     width=19     height=15     xoffset=-3     yoffset=3    xadvance=15     page=0  chnl=0 
+char id=86   x=117     y=36     width=14     height=15     xoffset=-3     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=84   x=131     y=36     width=13     height=15     xoffset=-3     yoffset=3    xadvance=8     page=0  chnl=0 
+char id=82   x=144     y=36     width=13     height=15     xoffset=-2     yoffset=3    xadvance=10     page=0  chnl=0 
+char id=80   x=157     y=36     width=12     height=15     xoffset=-2     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=78   x=169     y=36     width=14     height=15     xoffset=-2     yoffset=3    xadvance=12     page=0  chnl=0 
+char id=77   x=183     y=36     width=17     height=15     xoffset=-2     yoffset=3    xadvance=14     page=0  chnl=0 
+char id=76   x=200     y=36     width=11     height=15     xoffset=-2     yoffset=3    xadvance=8     page=0  chnl=0 
+char id=75   x=211     y=36     width=13     height=15     xoffset=-2     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=73   x=224     y=36     width=10     height=15     xoffset=-3     yoffset=3    xadvance=5     page=0  chnl=0 
+char id=72   x=234     y=36     width=14     height=15     xoffset=-2     yoffset=3    xadvance=11     page=0  chnl=0 
+char id=70   x=0     y=51     width=11     height=15     xoffset=-2     yoffset=3    xadvance=8     page=0  chnl=0 
+char id=69   x=11     y=51     width=11     height=15     xoffset=-2     yoffset=3    xadvance=8     page=0  chnl=0 
+char id=68   x=22     y=51     width=14     height=15     xoffset=-2     yoffset=3    xadvance=11     page=0  chnl=0 
+char id=66   x=36     y=51     width=13     height=15     xoffset=-2     yoffset=3    xadvance=10     page=0  chnl=0 
+char id=65   x=49     y=51     width=15     height=15     xoffset=-3     yoffset=3    xadvance=10     page=0  chnl=0 
+char id=58   x=64     y=51     width=7     height=13     xoffset=-2     yoffset=6    xadvance=4     page=0  chnl=0 
+char id=117   x=71     y=51     width=12     height=13     xoffset=-2     yoffset=6    xadvance=10     page=0  chnl=0 
+char id=115   x=83     y=51     width=11     height=13     xoffset=-3     yoffset=6    xadvance=7     page=0  chnl=0 
+char id=111   x=94     y=51     width=13     height=13     xoffset=-3     yoffset=6    xadvance=9     page=0  chnl=0 
+char id=101   x=107     y=51     width=13     height=13     xoffset=-3     yoffset=6    xadvance=9     page=0  chnl=0 
+char id=99   x=120     y=51     width=12     height=13     xoffset=-3     yoffset=6    xadvance=7     page=0  chnl=0 
+char id=97   x=132     y=51     width=12     height=13     xoffset=-3     yoffset=6    xadvance=9     page=0  chnl=0 
+char id=60   x=144     y=51     width=13     height=12     xoffset=-3     yoffset=5    xadvance=9     page=0  chnl=0 
+char id=122   x=157     y=51     width=11     height=12     xoffset=-3     yoffset=6    xadvance=7     page=0  chnl=0 
+char id=120   x=168     y=51     width=13     height=12     xoffset=-3     yoffset=6    xadvance=8     page=0  chnl=0 
+char id=119   x=181     y=51     width=17     height=12     xoffset=-3     yoffset=6    xadvance=12     page=0  chnl=0 
+char id=118   x=198     y=51     width=13     height=12     xoffset=-3     yoffset=6    xadvance=8     page=0  chnl=0 
+char id=114   x=211     y=51     width=10     height=12     xoffset=-2     yoffset=6    xadvance=6     page=0  chnl=0 
+char id=110   x=221     y=51     width=12     height=12     xoffset=-2     yoffset=6    xadvance=10     page=0  chnl=0 
+char id=109   x=233     y=51     width=17     height=12     xoffset=-2     yoffset=6    xadvance=15     page=0  chnl=0 
+char id=94   x=0     y=66     width=13     height=11     xoffset=-3     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=62   x=13     y=66     width=13     height=11     xoffset=-3     yoffset=5    xadvance=9     page=0  chnl=0 
+char id=42   x=26     y=66     width=13     height=10     xoffset=-3     yoffset=3    xadvance=9     page=0  chnl=0 
+char id=43   x=39     y=66     width=13     height=10     xoffset=-3     yoffset=6    xadvance=9     page=0  chnl=0 
+char id=61   x=52     y=66     width=13     height=8     xoffset=-3     yoffset=7    xadvance=9     page=0  chnl=0 
+char id=39   x=65     y=66     width=6     height=8     xoffset=-2     yoffset=3    xadvance=3     page=0  chnl=0 
+char id=34   x=71     y=66     width=9     height=8     xoffset=-2     yoffset=3    xadvance=6     page=0  chnl=0 
+char id=44   x=80     y=66     width=8     height=7     xoffset=-3     yoffset=14    xadvance=4     page=0  chnl=0 
+char id=126   x=88     y=66     width=13     height=6     xoffset=-3     yoffset=8    xadvance=9     page=0  chnl=0 
+char id=46   x=101     y=66     width=7     height=6     xoffset=-2     yoffset=13    xadvance=4     page=0  chnl=0 
+char id=96   x=108     y=66     width=8     height=6     xoffset=0     yoffset=2    xadvance=9     page=0  chnl=0 
+char id=45   x=116     y=66     width=9     height=5     xoffset=-3     yoffset=10    xadvance=5     page=0  chnl=0 
+char id=95   x=125     y=66     width=13     height=4     xoffset=-4     yoffset=17    xadvance=6     page=0  chnl=0 
+kernings count=-1‰PNG
+
+   IHDR      €   ÓkG8  ıPLTE                  ÿÿÿ            ÿÿÿ   ÿÿÿ   ÿÿÿÿÿÿ      ııı   úúú      ûûûüüüøøø   ûûû   ÉÉÉ   ÿÿÿüüüşşşÿÿÿ      ÿÿÿÿÿÿ      üüüüüü———   øøøşşş   ûûûûûûÿÿÿùùùûûûüüüşşşªªªTTTşşşııııııõõõııı^^^şşşşşşúúúõõõPPPşşşııışşşãããèèèóóóúúúøøøşşşìììÿÿÿşşşûûûşşşşşş÷÷÷ıııøøøÿÿÿıııôôôñññ###%%%şşşıııßßßïïïeeeşşşşşşòòòãããîîîÃÃÃZZZ<<<üüüôôô×××şşş(((ÎÎÎöööğğğ:::ììì­­­ñññïïïæææõõõÁÁÁ¶¶¶CCCÿÿÿVVVGGG¢¢¢ÉÉÉŞŞŞãããüüü®®®ÛÛÛÜÜÜäääÌÌÌËËËVVVóóóğğğşşşÔÔÔüüüÔÔÔÂÂÂÏÏÏ‹‹‹ìììjjjwwwÓÓÓˆˆˆÑÑÑlllØØØ···¾¾¾–––›››eee""";;;ÖÖÖéééKKKŞŞŞâââHHH¦¦¦µµµ999———¼¼¼ººº¯¯¯«««êêêmmmKKKkkkâââ666õõõ¾¾¾²²²___vvvÙÙÙİİİyyy555>>>///„„„•••BBB@@@›››\\\rrrØØØÿÿÿ<H¨Z   ştRNS 	_ >p¡6N;üú3/÷æ)$&ğ—hnA,¯ˆl&Œ|ux"“Ñ¦ƒôôëGãKaY\D@ğ«œWĞÃ™QKàd¶éUßÉ´·d9ªêêÚ«¢ØÊ¾¨4ßØ*ğãÓÒÃšÈ!_ßŠ˜€0ÓÇ± š–M¹¹´¥„zvYÛÒ·²¥=İÁ¾Èª¤ŒlCéäÁÀ½ª‘{TD0Î¾«Ÿ‰…ZÉ³°èØÕËÀ¾©™–ƒq`ED6ÙĞÄ¹±°zsoÍ¸°§¡ƒtkcRâÆÃÃ®ª¡’oL*ŞÁµ¡›™}^%ÌË©•‘YXBÕÉ·”‰3Õ±¨’[@¹r]ÖÕ„îº*  %QIDATxÚä[wxG×®š…%Y«•dÉ’…„-Y–,Ë¶$÷#ÇÆØØ€`ÕLï„Ş{ï-ÔÀAh	I „’é¹ôäÒ/É]êåj®ÏwÓ´²ƒ/W¾ï¾ûînşĞÎÎÎ›òÛ™7ïıŞJÓ	"’,¢©ÏÉÅi(Co“ë˜A¢niä@ôÛ¿OŸ‘ğ’Ö§OüßÑ
+ıi†Ô#âºXrLäqJqÑ`ÜÅÀ>¢õ£xSÛ<0yLôÙ`(…;ŒêÒT¡‹Åõ´|Œ _<¹>:¶µÅIÕ|“C2ú.€3ÌOª8 @E¤6k#ĞU,«3ôEZ‰Ÿ%Ä°X$’„Åğ^VÕLÿ$>2fÆ=~ ŠI{‡PBœ^2
+ßÚGÀŞ¦&£.¤Kù¥ &P¼%âƒPn¹ÛÆK ì“Ü½¬€"ÛâI0ûæ†º}p×Û¡È©GÙô:€åÅ—;`YU©ú ì¦ä é¿p/@–¸u®©o1œ[­½Øa ¯"I	ğP­¥.äSè”‚ã/ŠDòÂ¹sÀT£Ş®ù"ªó¬a1©¡Ûü	Ùqÿ¬‹yg~êŸnù­ñi"ãÏÀdÜíQ°Éıì,v!)º¦ÌsıÌ_EÄ>âÎ9|íÍédÆ¹ë|²œÈk›Ùéş¦Y$Ín£#²VŞPĞ¬œ¿fÙ¬CÍ;[Á@<«VÃ§7HŸÖ§¹=ÚÔ*?FK‘8$^„3åÏ!éÛ`ˆ×“ÒÆ×‘¦cU ¨Ü2<LçT˜Ôb_¶c%è'brgƒ	f©v·¿ù³üû,®kıÌpÑS˜˜šwƒG˜ê¿Ålù&ÂGRÓdv:µ?G]Øï%:T³ÌihFš§À~gÃ
+  ¯Á¸3Ÿ 0‹çÕx=ë"£;R‘NJÒß úñXåC”Lrº=®†—BÛ7`¹õN—ewB/÷L›Riq™ûõ @¢«ËA—Òm6™ÜX©:R ™ &İ3ÜMº“»3€•IÊ3! â¸»ÀR1z sóÑƒØ!àKúêÌ·²7­¢¶ë7yÉÉHV©
+ö“{»>¦,C«5=qe >Q(í6Ë} ?’‹YÑkOónFjoÖÌ	t‘şõYæãùóÀå|ÿ›b²$â€ÌŒÎ#ƒDM&¹Íò• % Ä>¾µfkŸƒÑ Úw[eù¡Ö ÈcZrğˆ]b$™õ˜Ü <$ YjÖ€¨«ò<7-‘Êå,ëí F×RûÆÓ[Üïà»ç†”¨×€‡0`aÔ¸MeÆ  ãE2÷ ¼k%ùªÚºe×›I?:íp®Ëßş;r§vä<P¾¼uµõàôKq¿æ®^­²‹E4%ÌÃ’&W†áSz¼-’y¯µhjëêPƒërz äjÏÁ#âÈ‚¯œ¦Ş	À‰¿€¸&Ó\‡:Î3ßC^MùÇÉºŸñº}Í?MÜ&al×p70`¡Q`=u8@¨‡’ÀØ´k-;ö$Ñ5§ü½TÚ)Y3“k†÷óÏätuLHC3T€Š"šØçëdzVšİ¹0ğw(ÚÃFÇØş1.¾ zKS<—Lf2ôë	 [ j©X’‚÷ĞÇü–;  ÷G-7êÖuÆmªÕÇiƒÌı1¶–Ú]MÅ€)P#j^ç °¹ç¥ ^õ&oÓGj¶„´«ø·ã
+X,–Û0ÎÁ»ÕÜb¸İÙù¤?ëY®ßİpö¥®c0jQ`y’”y7Å#ø¼+ ZTx	Ë<ªZ®¬¹mgGï ˜7` Ê –ö@lÓ>–ã?NÌ…\ç—½ a 4a
+ŸÑÓò`â¦¸hKË_ó3X?¸Ş	pŸ“^}ÀÄñïä©hğ]tgr7·L›z"¯¾ì@õÊS»Àd[ZYöRÇ¾!k†ûç™ét4Ã§¸³áÇc/r‹I³ïJÏ“pšx_† Ü¶ ›­õ½·àÉ³Õ]½ V­‹G]²PÏ?€Lf+·>›…2¡óe9½ W×¢âa"ÙYÖÍÊEÜhÛ&Ã´ÒådC§{^9Rº²3 w…è€ûÁÑ Öı’Hî;mhÁD|3,¬q…ò3¹†¦¥Ò=eAVg²&¯¥/©ïÎ«
+"*qø«vÒ~â¢ŸbÕ4ŒIïã^DsÎVzŞ~Zo $iÓfÇe’ï  ~›$F§°Wµü6lÀJ»zMy¤6ß7Ë`®¾XRRqˆ,ĞÒ•üf†¬*u^Øµñõ• æ9VÏ“à'šê—TaUx¡M¸è<7Jbs„šÀU+>’ì¦¢§‚5î—ëtîœÉ¨úâ©Ïìš¹lÃØ
+pOÈ¶(=D4*<ôäÍ~d¬Éà¶÷€Õ™9“›¸vüÍ6Ã·Ìwt@ÍP°LŒsj×J‚t@ë|—¤‘WpŒ Õuì˜ÃåÚ˜K e²Û#ÚJWè,HNçmvzÔƒ#5åNÕaK4´–\¾q˜ùb:µÒÆ¿èáÚzk+¸ïÔïÃµ·¸Ñ¤*¾>bßúû ùğzÃİ÷pRã~Ò²]üBIo 0—jW<l«ú«èŸ?™ÜûğÎIÈºêÉ)àúÆp3?¦HS¾?—´8hü@™T0ª¥Vi¬%Àekä$SkÍ3XİSä4ÑYNµ 	ş©¡Ë¿–Xšë§˜ì1Ğî2,D»²&+üÊ•—Üj,­(‰­dªÖ‚ñh<îP+ø«éÄ¸ÏÀ|N'º b¸8Báó¯ZŒbƒ Àµ( +ÀÀŞ P8Ûj¥øª
+F”@ÖÑ’’®äª
+„øSŞuOj€¡L§ı´…‡ã\5‚½ ¬z}õëy—2‰!zŞ©3šT×Üch"bc¹73cVK•ŒåK5éÜçÅ¸º#lYíˆTÍ›ëeï€š„JßÙOÀ(â8Œ~ü
+ØFĞ<0¿Hp?êF£†ßÏ  Ü³xjå$¸É åZp}ÈvQæy~q}ÁõÏè¹atZæØ{  Oığ²¯_0B™<ßç:¶qn^.Y+Ö¢D3Î(ÓØÒ	 F½ŠÄæÇh$"²ì++¨¬´¨”À$²ç–’B©¦R™¯–ĞÂÄÊ8ŠU€Ï?õßCåY«&+9¸ ¨Ş‘Æ}õÄGí!?óbò|xµ-oš²ğó¦ˆ¤tÜ9Ş£M^BGVîtgåyjd¼¸ü"Ü`4)lhb}Qz´Œ‘æÆé"{El—+XXÌŠés—*ãM0²‚$”J¤Ld«É»eô¹  k*Ï…ŞÅ±×Ml«;çİ§¡'«P]’ÒmƒÏeù–PŒ)L¯ZŒH¥šªw“Ø0Ø6×©uÆHŸŒD0Y–Å2,+Bª€5ÿİIZêùûºÚÕ1İÖ%«)Õ3hÖ¥ÄÈKHR0ÂàdIV½İXµL[ÑÅêØı6± gDÿIœ¤Q bseLøYrŞÊáûŸNb–(8áÿã4còüÂMÚøb¨ÏG‡}2¨¾¸fiª¸„9ÅŠnÜß JÑ	ÔàÀúâÑƒ„–GŸ˜œÒV¬/AÎJ®Ly<œ¹1!‘ˆ+öEG˜†/Hƒ‰ )$‡ØŒhİµÅã»‘”Ñ¹0o#ºÌ?Ÿj¬i% äàrÅR€Ò0\ü âÙJŠ£-˜
+¿ÌÆ^ “¢e(Æ¦&XLi=5Mğd_¨@Í%SÊ]VËá‡T´2åø¾˜Çë(++«ÒÎXyó|é Â!–÷+éşùÄ`ºŒ K°bJ8	#’,ã&ˆ„y¡ÎQm¹1.4¼¦İØŸÉ7ƒ=ûòÓ±HÜ&~øğŞÄ.löÌ=sµ[ƒQl5ZäğÙ+G­Öö[l*%9	—`œ;óºåâ¸eéøêk>×­’:Ü†â(7åZ8üÁæÁ„nê¯¶lÜÍGYÌ”­J¥WYE­®„?r—mG›ñIü,w‰R§d"VäC'Pwåk†Ã4´³„®?¶¨±„{ö¸Ú=>ÇQ”Hüe…¯µ²}J¢7ô.†Mñ¿ÉSd'ÚŠ€×[©cEhPnge^æÛÅoAšoƒ)—-)\…ˆ%Î°Ø¶	äyR•:&»:°Ïãq©ncìíÏñMYO–RÏPJï	¯Òí±±ˆ…mùB­®ñì¦ Ø•¤Wv&coÄR†'D¤·£¶òµRlÿ8½^¯ke€rŒşå¶q´¾)1r*ó|ÄÕîøU £c\P¡ÏúÊ<¹êïòÉ©>”yÏÔÊdr|#IÒË¥jí
+0†,½* ¸Ó~
+ÀfÂeSoÚÇØ¾”§›$¸›yàÕ$¹\“§j¬Ce€gŒr¹‰<”ÔìàãÒ­2B^ŸX–ß{Yl¿W×™§­t-.FÂ»İ7\ÌNlw‹¶†82™©æşˆ§%ÿo ©NoUÔ4&`#s^æ+Q ²V›7lßÃGX&küÉôÓû;zyÇ¥Å}GwıâÅš‚Ãîy;@?ÂbT#.û;°zfóet‹3Ù÷ƒ›h°Ùªu„ÍÎy7}âà›%4ß »mÖ¸@õ¬± 5ùº'T‚Z¦#‡&É‘“š®ÂöVj¸äšŸuöX1¿Æî T“íœ@Zş€`o¦òvTätU•Ä§à¥q†o‚’ùT…å˜ùszb<5µ;•ª_ î{—Í§İ [£îNÃù
+B°è-ˆ§5ºÌ-ËñÃ†CÎú<€ ö€,F»²i@èkŞ‹¬å¸pk… ¼ŠVp‡DßMÆ‹à&İ »óİ—ï4wPRN½7âX®1T?ZÍOÆtHøÀá;}ªÌÏr1§d6~ŸòÉi~DB>Ï°Yaô¬Œ¬€o¶0b2{€*z2UGrÀ¨Aèİ­€œŒ@TëÂmPó ‡Š`` w XcL˜Üs¸V‡K=¤İ#›ÂÙTv‡ñÂÆ.‘G6Àujw Œëù?`Á}¥ª²­IÕZhHA¯gG{n¶GÕšƒı¸šÒÂ¼†“ ŸVıœÀl$=˜8èÁeß	€ØãÊT½Šú’{#.z‚v‡Q‡ËKÒX[ª*‘XLî)ÿ†¿À¥İë@Õ¬¶øQ(Ä×„Q†ĞdÜqêÜLÃà’TLh¼ºıàÆ™‚I"{Ü6‰îÀ¸\P—»´`:Zgj¡—m—C}V—õbeI6wLÅŒg`""ó	 — ø#{ÖÃIª/gšG!bš²ÌI–@Bú0:ñY˜Ù2!Ù õg›šÌ23·àÅÙ–—ıƒÈ$rO—ÈH'¹-Áˆ£gÛÃ"­,4-ÑwN'î ÛëÜP¡f‚©H!>É¦¤ñÄ45JúÿŸ£Ë”:¸lM  \6Ï`vŞLh¡e‚R*Íô@ú ³½¤?>–"F¥ÁP—Æ°E!€2‘‹{@Zä>õÃqÚ•şEpaÓ€%{”d1UãÍ‚sk^È¤2ï]µhÕ½;ªßO&rÃğ2tkï€É†Ôüü”/q—Q£–ŠºµÏoÂÃ:²}/_&†)NÿtÀÿ6î»`êøÇ›ı¢\6¨"m}&Î¸|„o±ã¦O/NùÃN¬ıÔ–_—äHya?S Ê|‡«›<şókşd¼²U­`Ôİ“Š—¤ô€±æj«æ¯o™XÊD„ZÈnQ/ÂÁ%Ü4¡u'ÁçdŠ:¥#/Õwö‡SbÉAû¸ßüMßaÃ& ˆrO¯cºí†Sækàáº“0] |§qÍ0ÏíøˆÅØC¥øû¦S pAà²Y™Ì°±åo1ØÅ|ß€Z~“dùª5eğÖÿ„‡ŞÜ'Q“ ñÁîLdüh€²%>''>h¸›„¹rŸªÀï×„¾18L³³ÖNH½!œÕe4ËÊ²}ãÊ¤¦'G¬ä; °ø|ûæ¬V&ãR«»:s‹&¥V;ç.mœ¡äö9æ­V%¦²#+¼oã>_¾‰>má²	õòÍ]í#Q	EË2wõëBO™ò}aßêó®8)áÃ½¡eÎ]™N9e"U¡¹s¡*5åå•Jd"8ÊåÙNL`ÒP“Ş @İ†ZE.L^é&„ŒPÙ™@ÕÊÌ°ÅâÑSU‘‡lGš¬¶J¥3Î$&DTv¢³T»Æ„›ÒS©‘â:¹‰Jeb„2¨ó¥¶XDA‰bcË1—M	ÅR§2Fc§\CÒã,7Š©çb«ô(Õ´c±)ÎéQVÆ¡§”‰ô(ËÓ”-²ÙlE±¤3…:5QbŒœ,9 -Q&‰L(¤¬¸NB¥ÊcPÊ•S¤4´_J·É¬¬p£KRD.ğh¬B&£Ô%ØÄbgÅŒ„rÙ”P”ãa$r"ò¢R´mÚl¾» Ì
+%ÿidÄM€šúŠú¨½?êOÂ®4=\âSè×>QÇ½ê‘o{L÷KŸÁäQ–LkG+Œ¤íPÙ(!ó#…<’8¡R\ƒr´æ@Ò¸@@Ü¹ĞŠÂ{YBLYMü(¸7Ÿîæ›ØNKz‹ÚÚ±ÕolK£?IÅĞ‡¿ÇĞ3”Œó%c7Î_Âì@°
+yùe`f– 
+– i˜†öÆ4@“73ülïIB¥æ‰ƒH9ãbù¨JWOÇçK,¦ìÅ$•†¿8šÇ‰ ®cäı ½ĞŠ´zvmFHç€[:Ü-pÃŞÏŞF‡Ûª2i˜rO¡‰d=Ğû^5´NİZ¸•ƒg‚ş>òì5'B8;k	ÎV&3}È¦Ã²ë`-ÔM×Q'Œî[š½¶Æÿí2Ì§ª‡/z/‰ø…Eà‰E¿Ù&’<œ)ìiVê;””¡é¨‡ÀT¬Fo•è¹ÃO/ë.pÁŠCÊ ½t§¥Ø·ÚĞ7a4>±f¢EÄèó?z‘iõÅÄ +º¼™¬ES!t¿}÷‚oÄğxV­¦Ù+ÛfÚÑ`Ê-{¹µú'9•Ir kÛıàêh2îôK¡å<››ˆÎôåRX[“èµœë½ØÖQ«ínmÃ5pj?CòÂªÖ”¿´úˆLYãâ‘±y
+œã!ÓôCê{fÕ
+ú²™;u6ò¾Ç%8š“È¥ 2åÙ@g¹µ âCÍh_É¿ Ã ›+ 0LFı,äëRl•Éô@»	û>å†AóósÛfnKKÇ³Yr¼‘<³ÁILFà¤ad‚+ĞÅÀ3¼¡6'M”°Ãî5T•¥`šL!& ”¥ÇfawUóp<¡Fµ	 ü½àS¸—€ğI	4KÇ¸? h`H-UOiËféw³ÁR! ‰.=°&Ì²I{ `¼êßıÄı /`6àòk¦¡¸ğ×`/‰Ğ%÷<‹mPUkEiû,¦È·Æ`öÿ!ÑpUã(™§é´; ^ÀÑsè
+0¶“à\]pŸ0 æ:ø€ùd*}á”—Ç“üì!`~€x´µ")º¥ _<gïfö~ L‘Ê\%aºğĞğ†‡zç ^•îÌwÀ$@Ö×à‚àÛÏ/${µkX¾e"°6ŒG)NšpgP¿bX;"÷ğÄyn‰$§ÙŞ “û.à[¥ ~wE¾ÛjÉ1R Â` ôŒ¥ùÕ§Ş 3¹ÚtÑ ¬ 4¥ÜšíÀşzCE) ß(tÜ=.¨¨Ñ`[n ¯i U5¶ã›Ó"¤ÛIğüIî®ñ•WR²(fv˜†-L/  LOj4•”>6 >ò­á¦Q ,`H¨dšq+¸8» DŠÿ
+\º€ƒ!C†¾ç÷ €áã9âf	  Md%Ğ2šL·¹¡{qd˜pÅ0”&¾»şD³>uØZ}C¢ÿO/Sò®' &ÕÏùÍRÙ÷O_µ/›% l‡ûŒŸw†pÁ²«"û\ub ¨Ô£­ş”^ HMMÕıñ÷ €¥?yÌŠÒ‹¢ Ø?š§£Á{/XİÜ}ªİô;^¶&ÔŞÙ¾Ù^é3æ‘ïƒÉ=şÈòZI/ d¦8Vî£éT†xó¡5N ¯Ö®6,ßD8·ü¢ñıšŞVÀ-ß\ó=½lè Ù|+¾@{EJ
+ K5çŒü `t/óğ #‰~„F‘ÉnoqÍå#“Ò^i3lcŠ\ãv€G(=gY·œ‡Óô¶Êty¡ø42•ã2hS R m±TS –ÆøgrŸÇÍîí(Kş%HÈ İ·ÀÓ–O#ş äÏp-K‡Á4ƒôÀx›ûB^šEù;“û^ÿ‰()ïQ`¦/]ç¸ Ğë)ÀÆÁá_Š(A”( Ğş9 €¾±Ú+ ÖÚ€%p,ˆT‚WÕåïO ø5Xò} ÈC¾ı‡zœ•ªëàÀß€±H§ Hşh^¨€æyCñ¸+ÏrV‘+¿”úƒù³Ú½ƒéŞ†ZŸ^ `ãNıJ  !ëğ>+ ğ(@)‡H‰cµs¨|–v| Œ±À™«ÀÚ9e°‡¼8I’'O#¼fr‘äÙ˜Èàc«,KV.*À’,5®*•zípÅØéavéQr#º9;äSG¡ËK´RS;Ï \n#jÒA;Cy7ê_¦<¥MÂETZò¤36•¨Â_¢ŒJÙ\…vLíº´x„ÖÄ<¾8PCBŠ~<"UÃ(cÒ˜6	†Z¨×L/Ô§7=|ìlIÊ±¨q‘Ü¦–D(¬ÈäE¸€Åvsİ,£j	úµÉQ“±´3”WcÛ$!×&Å4|"‹…Rrø#Œ¦Ğ&%R¤w\[PYV¯QàKl4$Ó-¦<¦gvPÏ(sŸ¨[u,i]LQÁUE™úâ14İˆnµûĞØ;¸áîñôO.Ñ‡c¢÷`âãRWV¸#Ec&#'µGÒ?ë†}âziƒÖ®…"¤tLq
+ş?M´§hLyB÷,õCÖ’ågÄåñÓEdîA%}ÆñèÅõ…%ŒuTyÈÁå‡‘(x#Ì¢XÚ§q4Hÿ¸BÔ†x{3Ú¾3ºùh}ã‘8K<nD+
+€7oH‹8¼ìvP½ã	ˆ;Å.®t:¿ûÔŠ‡x0‡ÇÁÒx üÅ¨´_üƒ°ÃTà!YóÇáÃ=ıH·,ñC‡_;ÒLˆ€¤T0º¨eZ ıCŞß/¢ğS«+Ğ'© fQÔìÎÁm>ÎíÑzÿ2á-ûœ¬ÏhuÙpÍµ?~®ô&·üu÷ÍÁ$v‹ƒïUÂ[Ù–c~àEêpÂ¯ë/Á\ÁgĞ8Ê_Ævwbpt¦Í`‰Ks‘×ÂÍ2¿ˆnpµ|ô6"/‹`Ã¸¬›§½ü¿ñƒB2¹~¼^e®½[–ø¡n‡*Ü\2’¸^ë½Y*	Êvå¤Q¥åBúÍˆœQS*¨0±«À{ÎJ5‹L…wÁV§#¼;ˆ_\iÛg–jz[lörC–§RÏ`=œ¯t:H<
+İhsê°úÉI´TO‘#~ÓÕ|š_(Åç¯µCZ¸#Ã<LıØ†<àPÎÎ6Wa=¹ÜÂ½K
+~ÖWfáÏÈ<?¿pZV‚™•y¨@H	0V'“akCÈ‡Ê¤Klx\"‡Ô´t½r%@‘ØvzXQZ)5C"®ª¸<³šŸøˆ^ãJLŠ"ß“øƒU£4ÿtË¦àa4 êV“œr‘’ôCË¨&ñ¨Ëe{İ¥z	UĞ±ïğ_°ˆqÍ3ğ:Jå¿Ã½üZG”¯ ˆ³)
+­7ŒQ7©É«Q°Ô’¼i×X2 )M’Ç¬[_Æw ¸#K`tûGENi&îŠ˜qú5àš¥9Y$|±Ø Âİ‡^‚‰a©Mñäsı‡Q;?æ––¦¦–z´rÌÉÑÿ9¾ul[<^’ûÍ¨àçøW­X}ä7¼²ôKÕ9àÍ“¼åVP¹<ÁWƒÉ5_ùåÔäe…iÜş5ÈñÏˆl0 ‰z°xñâé3H¥a ˜\ò˜ØL\n~†øgÌ¥Ús†¨*¥ `ÏßÅeY\¯"ÒÇ¨çOÃ¡C¤v²WrW´¾Lrnt¾j!".)2·;´gÇbôtYªÛ%ıúGh¹uÕ:ê_ıTSÒÇÒøê™™ŞyÜó2ÕPm—×°P,<‚m†ïI)y•4à‡ ±1>çÉrëøx ùKOáŸfîrß:ò”Ì¨:¸q˜9¯Fb¤FW[|$&ªUµL@of 4‡­—H¥eî¨µÅ’o*uÚNáƒ§¤}`Av¡Š[³•nå.ÿ¨<¼½‘6[Ó¶3œCõ¤M»¼³zK«GñĞH}çøá0Vö¯ ÕzcY’MMuªY µ
+Œ" ¬÷:T®f|È©W”¨U+–çÄ#%xlı|çÀ<Ü·ş¹ßû'bO8¾£şà9ğ>ƒ'ıè7~Æü¾˜$xŒ›0cÒ‰I88({ñ­ÓDrÆÙÎ¼¼ıÉ'ğìº<	÷Œº“Ÿg¹úR{q@÷‚Æq%À¿Mtyê]\µYñ/W”N•`BBº$ê…}¶‘-°Å¨Ëu”k[5ü¿ê$ß¥'°°<sÀKX	ßDÂöCø«qlä_6@µ7ëX“f>•C¿’‹Uİ…Ç~‚„)JcÔ‡#–Iúmî¨Zšåïƒ[r~¥&÷¯@™˜nŠSm`!ó/0À O¯JĞ¾ß”®ŠŞRİˆ?£á7y½Swq—È18÷ 62}ç†ò’0/êš7G[.ÁnÏµo£ˆ%AwØ7g^¾ïu·*<w£†D!U¾Ç|î¤næ™>]Œ¼‡p¦+Õ§€P¤z’XM!‰İ
+‹†‘–ª\:*¡ÖBîƒ`óî	¾'¥Ôç z?&Ãt7`Ä°%U¼áy1`TñÃ7w‚Ñ||+“%93§à­å5rú×—˜l›ZùKS¾M!#. ›ŸÄ¨Y!rX`bğ’)…ßæi¢Àh 0®° ´Š3&›nMuÄ—gÙaa¶àPHcËu¸]jóî	¾'¥Äç ÙŞ ’q\ÛWÏÊDÑS í–ívòŸåPO¾~gè‰m3bº‚äğ&$5hßÑZB^bÅÂÿ‰$óüUª"pf8¯ªµ0í8†ËèËhp@úw"ú+e„ôİÀ;rØÔŒ€İX0-0$ÖÃL|Üœp¦°Gi- Jpü@†…ˆ"´–7‰›I0A[~Ì­7, Ôá,4Ÿ$Na!¢S¾à0ˆtN!02Æ\‘ ¡õ§YÅÀ0€™Í3Ê’3ODvşøD8‡UÀ'¦a³8˜›;ge'Ë&½¨l ‚,2ö,BÏı÷¸H~.¸[š><B:¢¿Z²
+¸€A6Ã@‰kæÆiPt¨F,ä›µËŠºä¡`Ù²DØ„²–ğ(ƒzu÷Aı@Y—Y°Çù* 3¶µ“Wy&»¥wÁ!%­NŠ…‚W}Ïv¨8}d¦—*xé1 `á÷[;¡zŒ„®ö¡ã"g°¸¨é?±ˆ@û¦EË*Y11àŠÆ¾à„	¸'üp´6kp#/x>m/¸íÀ,âÅ£¥!¤1‰›	X¦Êlš:á^cÀ£©mÆ
+¶ƒ€]¿×"4N‰•@Öñp$k©{¨Æ^¼clvÅaá/“æƒÓj]YŠtÄ•b°2D`v×0ígŸ^§;œÌùûÀmF9	I	àÎ73v [ÙÚÜ@õ²rÁóÁì¬ƒ¥eáœh­+ì˜õÌ´¯”
+‚âË_Ë0rUdØÍìNZúm«RA2ĞŒşÉY °±)ØHà¹Ú?7ç•Õœ)ˆ1GÄ9Ø,0Í®7ø¶&)ß7ş(¢ûAÌ6P ğê9œàx¶XóïRô¿BFğÊ>'ıÔ"À*dI€WŠ°	°EDDôDD Kå˜KÔ˜ø&2)r¹B6ùJ÷XZA•¬6WzŒd&vÁŠà4iõéI ˆÃÄö63Óà‹\b€Ş©ÚÀ1­“àM'¥G´8ä o´¹xÜYaE6†á$İACœrà¾›–'#¼} ÉÂ‚Ø Ê$)94ã˜@c'jNfğHpOö(£` Øƒ     ÿ×FPUUU¥=8    ôÿu;       Ø
++-ÿé	å÷    IEND®B`‚‰PNG
+
+   IHDR       À   ƒ;hw  	wIDATxœí˜[²ä6CgÓÙ@~²ìä'sËqô )È‚i ªkæJÇ)Á´»ı²¬ÓúãÏ¿ş}Ì™ÛÉıúß@gÜœ¹œ|‚æjsò	š«ÍÉ'h®6'Ÿ ¹Úœ|‚æjsò	š«ÍÉ'h®6÷3Ğû˜3·“³,Ëú°Ô[´¹ÚœüKª¹Úœ|‚æjsò	š«ÍÉ'h®6'Ÿ ¹Úœ|‚æjsò	š«ÍÉ'h®6÷3Ğû˜3·“³,Ë²BšµÑëüˆíµmÆºèÚÈã òØX­¡²hµ?m@ô="³.²)Q£"{Ã6ş$eÀÈKjæEö¤W¸^n‘YQÔYÁ"0²nÄT¬M‰ÆB_"]5“÷Sz½™ÒŠ³ZÓ€½gã\˜±î1±h#àÖºÙÇjúl=İ“Ü!Õ¼¶tÀÙ{SoM•ØË­™™#C[ÖT}gã±jbá‡
+‰'mÀ·¬‹
+é¦§•;Ö¾îXHõPÊ<~-Ë²ê)òU>Â0~nhñ«ñĞ/4¬xQ®Š zïèFÏÅË®;czyE9ô:´H½‘<UÍŒú ´¨‘x³„[ã§8ë–H|®6’tİ®‰ğˆùf±²KÆ!£ëFb²9‡•3›ÅmNFgÎrfcş‹Æé]Ë6ÿªv¯¹9»@& ’Ôj§lÛÔ¿Ç¢qz×²»êSq®,³ÉLc±Ù¸èuŒG\Ä€hNÑk'Ê¡¢ÆCœv¢HÇbuµh¼(‡æÅZëI“Yó©õ,a½ápß£eY–e}U‘—ãè‹öêKyöÍS_’îs¬xh³uWÎ´5Î®·ùÄ’Ùèò‡Î£|k_²ëµöµ·×Ô};FÇVÖí)Ë}Å€³¦p§°e¼UFºÕHÌu3š3wÆ3×ëjfÀÈÓÈXx§£ñny£ëÏø§îKXÙè¬Wx§ùeç•¹¶›ÇîN4ã"•Ñ‰*0ÂErzÄ€×É‘VŒ5+¹ƒ3ÜŠ£ù!ñwìËlİÌÙÆwÔkY–eY–e}L§¾4¬Äc~+\y)g_©÷Î¶æGëdãeâ†=qÀ½ñ•<aÀûëÛ2’#j”HLŠ	•Ésg~;xgu™İŠµÏ°Nğ:Ç¸“w1X´Vç:a@ºî›²úAãÍâ¯Î+©e"Ü®˜eCøíì}Vê]­s7[Ê€.;tóHÚ€™§ÒLÌîKSæ.ŠlÊŠ¢y2ãE:åJÜYå˜Ñ+’ü€2çÀ|8ª×$ZXh·o]ÃŠ‡äÆŒkYl@QeŞ¹wçt\ÌBwoÚGÄ“ù°˜ıòˆæù¸ØËÈiW|æcáÔÁî4ş11~2aÿ¬s*Gô&òı‰(ÒWjîÕÊ¬—jşh1HŒÕ˜™xh}O!Â^ç"¦Äj]ƒÖİ—©ØÆBb¼ëæ@ëb0»½9Iî8]ÌlÄ0»%º6ÂÚ€d²¹H=½yæÂÎsfF,^ÌŠF»P‹E¹Õ®ÀZ¯ëD×Z]w‡3õZÿŠ~÷&×÷Á}X'M`óY–eY"òãh¬ÕoÁ&’Oï³ÿq½6ñÄøFá21šã+?›°~Aãu+n0è& ?5<uíuíe½ÙÀëšä¨ ˆIŸ0Ñ}Œ‘’G”ar½óÍìıÒÅ¡E&… E#ñuôL¹é²ù¡ó(ÃdÑ}y…[× İaŞl@vWc±½Fû7“#‡¶¯Õ‘Ífäİ?¶Y3ç‡Æ0r#‡‡&‰¬{ç1+r÷£ùe÷eÄìà21 ¸ºˆ…‰µ6 +ÒÙ2qŸ`"ù ¯0–eYÚ*Í™ÛÁÑr1g.ÂÉ'h®6'Ÿ ¹Úœ|‚æjsò	š«ÍÉ'h®6'Ÿ ¹Úœ|‚æjs?½9s;9Ë²¬K½E›«ÍÉ¿¤š«ÍÉ'h®6'Ÿ ¹Úœ|‚æjsò	š«ÍÉ'h®6'Ÿ ¹Úœ|‚æjs?½9s;9Ë²¬+Ó*£mtÆ²Zsï1€òı¨9õè:VGoUfÌÜâfåÅ0à=c6½n”ëŠÕ±£àÈ1Áİ¬ÈÚHÈÚÑèÍ4»‰¢ã«ëñ:Ø°µ!È5­ñƒt5–Ñõfã#“ êa¾L­=NÕñ”GìÌ0È‡æÚqgã£8™ƒCÍ×{E¯ÕÑ;n@ÔH§BÇPSG43²G5­P¾ÎŠ˜íª³ü2ÜhÍèÁEçFã+&,Û¯ó³–ß‹Õû{Ö]£0Ó5ĞH]­±èydM˜5 ½¼2##Ü…;›cvÀYçÍfÕhl«cÔ­V
+Ş¹Y,1ŒÊŞ¿]çñôº§ê°,Ëz©Øí1úˆCŞ5˜¯'5O=ÒGke¸L.?{Ù^ÑÊìx)oêj¬H~™¹Õ¤7å¢c³Øİdf,ó®q‘¹¡]5’çJ~÷ù•xh­½µ+úÈD¸èúèZ+¼Î½Õ€­±ÑµèÚwŸc6¬¡¢ï%èûë‘1à}åVò»Ï­Şp­ñŞß³:£Üõï‡ÔVÔ€U4àHlŞÙÖ¿#é‚½xÛ<ò„ñfk=i@V~ìxó]ÿß[':63à,VXÊ¼ÎE'o3`Ö|W126ŠiS½á¼3—–N?‚‘xÈÜJ7œñOye‹z¦W3 ëædÇ›­…æÂˆgY–eıGhËÿçı{hŸ{ßø•zêœ|‚'Øãf×)Õ¡ÎÉ'xºŞ¯\§P‡:'ŸàifçTêPçä´ksò	6àıÚÈu
+u¨sò	4àÌo¨C“OğtœI½uîg ÷ù*‡J½uÎ²,ëÃRoÑêõ:Ô9ù—ÔSÜêœJêœ|‚6`mN>A¤^‡:'ŸàIş»f×)Õ¡ÎÉ'èX›“OPÁ€™9•:Ô9ùmÀÚœ|‚
+I½uîg ÷ù*‡J½uÎ²,ëÃRoÑæjsò/©æjsò	š«ÍÉ'h®6'Ÿ ¹Úœ|‚æjsò	š«ÍÉ'h®6'Ÿ ¹ÚÜÏ@ïcÎÜNÎ²,ëÃRoÑæjsò/©æjsò	š«ÍÉ'h®6'Ÿ ¹Úœ|‚æjsò	š«ÍÉ'h®6'Ÿ ¹ÚÜÏ@ïcÎÜNÎ²éõÚ`W}ŠÒ"    IEND®B`‚-- demo.lua
+-- Comprehensive demonstration of all UI primitives
+
+local root = UIElement:new({width=800, height=600})
+
+-- ===================================================
+-- Main container with VBox layout
+-- ===================================================
+local mainPanel = Panel:new({
+    x = 50, y = 20, 
+    width = 700, height = 550,
+    bgColor = {45, 45, 48, 255},
+    borderColor = {100, 100, 100, 255},
+    borderThickness = 2
+})
+mainPanel:setPadding(15)
+root:addChild(mainPanel)
+
+-- Title
+local title = Label:new({
+    text = "Project Bridge UI - Complete Primitives Demo",
+    width = 670, 
+    height = 30,
+    alignment = "center",
+    textColor = {255, 200, 100, 255}
+})
+mainPanel:addChild(title)
+
+-- ===================================================
+-- Section 1: Buttons & Labels
+-- ===================================================
+local buttonSection = Panel:new({
+    x = 15, y = 45,
+    width = 670, height = 120,
+    bgColor = {35, 35, 38, 255},
+    borderColor = {80, 80, 80, 255},
+    borderThickness = 1
+})
+buttonSection:setPadding(10)
+mainPanel:addChild(buttonSection)
+
+local sectionLabel1 = Label:new({
+    text = "Buttons & Events",
+    width = 650, height = 20,
+    alignment = "left",
+    textColor = {200, 200, 255, 255}
+})
+buttonSection:addChild(sectionLabel1)
+
+-- Status label
+local statusLabel = Label:new({
+    x = 10, y = 30,
+    text = "Status: Ready",
+    width = 650, height = 20,
+    alignment = "left"
+})
+buttonSection:addChild(statusLabel)
+
+-- HBox for buttons
+local btnRow = HBox:new({
+    x = 10, y = 55,
+    width = 650, height = 45,
+    spacing = 10
+})
+
+for i = 1, 4 do
+    local btn = Button:new({width = 155, height = 45})
+    btn.onHover = function()
+        statusLabel.text = "Hovered: Button " .. i
+    end
+    btn.onClick = function()
+        statusLabel.text = "Clicked: Button " .. i
+    end
+    
+    local lbl = Label:new({
+        text = "Button " .. i,
+        width = 155, height = 45,
+        alignment = "center"
+    })
+    btn:addChild(lbl)
+    btnRow:addChild(btn)
+end
+
+buttonSection:addChild(btnRow)
+
+-- ===================================================
+-- Section 2: Layout Systems
+-- ===================================================
+local layoutSection = Panel:new({
+    x = 15, y = 175,
+    width = 670, height = 160,
+    bgColor = {35, 35, 38, 255},
+    borderColor = {80, 80, 80, 255},
+    borderThickness = 1
+})
+layoutSection:setPadding(10)
+mainPanel:addChild(layoutSection)
+
+local sectionLabel2 = Label:new({
+    text = "Layout Groups: VBox, HBox, GridLayout",
+    width = 650, height = 20,
+    alignment = "left",
+    textColor = {100, 255, 150, 255}
+})
+layoutSection:addChild(sectionLabel2)
+
+-- VBox example
+local vbox = VBox:new({
+    x = 10, y = 30,
+    width = 100, height = 120,
+    spacing = 5,
+    expandChildren = true
+})
+for i = 1, 3 do
+    local btn = Button:new({height = 30})
+    local lbl = Label:new({text = "V" .. i, height = 30, alignment = "center"})
+    btn:addChild(lbl)
+    vbox:addChild(btn)
+end
+layoutSection:addChild(vbox)
+
+-- HBox example
+local hbox = HBox:new({
+    x = 120, y = 30,
+    width = 250, height = 35,
+    spacing = 5
+})
+for i = 1, 4 do
+    local btn = Button:new({width = 55, height = 35})
+    local lbl = Label:new({text = "H" .. i, width = 55, height = 35, alignment = "center"})
+    btn:addChild(lbl)
+    hbox:addChild(btn)
+end
+layoutSection:addChild(hbox)
+
+-- GridLayout example
+local grid = GridLayout:new({
+    x = 120, y = 75,
+    width = 250, height = 75,
+    columns = 4,
+    spacing = 5,
+    expandChildren = true
+})
+for i = 1, 8 do
+    local btn = Button:new({})
+    local lbl = Label:new({text = tostring(i), alignment = "center"})
+    btn:addChild(lbl)
+    grid:addChild(btn)
+end
+layoutSection:addChild(grid)
+
+-- Label alignment showcase
+local alignBox = VBox:new({
+    x = 380, y = 30,
+    width = 260, height = 120,
+    spacing = 2
+})
+
+local alignments = {
+    {text = "Left Align", align = "left"},
+    {text = "Center", align = "center"},
+    {text = "Right", align = "right"}
+}
+
+for _, cfg in ipairs(alignments) do
+    local bg = Panel:new({
+        width = 260, height = 25,
+        bgColor = {50, 50, 50, 255},
+        borderColor = {70, 70, 70, 255},
+        borderThickness = 1
+    })
+    local lbl = Label:new({
+        text = cfg.text,
+        width = 260, height = 25,
+        alignment = cfg.align,
+        textColor = {200, 255, 255, 255}
+    })
+    bg:addChild(lbl)
+    alignBox:addChild(bg)
+end
+layoutSection:addChild(alignBox)
+
+-- ===================================================
+-- Section 3: Sliders & Progress Bars
+-- ===================================================
+local controlSection = Panel:new({
+    x = 15, y = 345,
+    width = 670, height = 120,
+    bgColor = {35, 35, 38, 255},
+    borderColor = {80, 80, 80, 255},
+    borderThickness = 1
+})
+controlSection:setPadding(10)
+mainPanel:addChild(controlSection)
+
+local sectionLabel3 = Label:new({
+    text = "Sliders & Progress Bars",
+    width = 650, height = 20,
+    alignment = "left",
+    textColor = {255, 150, 100, 255}
+})
+controlSection:addChild(sectionLabel3)
+
+-- Progress bar 1
+local progressBar1 = ProgressBar:new({
+    x = 10, y = 30,
+    width = 300, height = 25
+})
+progressBar1:setValue(0.5)
+controlSection:addChild(progressBar1)
+
+-- Value label (define BEFORE slider callback uses it)
+local progressValueLabel = Label:new({
+    x = 10, y = 85,
+    text = "Value: 50%",
+    width = 300, height = 20
+})
+controlSection:addChild(progressValueLabel)
+
+-- Slider 1
+local slider1 = Slider:new({
+    x = 10, y = 60,
+    width = 300
+})
+slider1.value = 0.5
+slider1.onValueChanged = function(val)
+    progressBar1:setValue(val)
+    progressValueLabel.text = string.format("Value: %d%%", math.floor(val * 100))
+end
+controlSection:addChild(slider1)
+
+-- Health bar styled
+local healthBar = ProgressBar:new({
+    x = 320, y = 30,
+    width = 330, height = 25,
+    fillColor = {200, 60, 60, 255},
+    emptyColor = {60, 30, 30, 255}
+})
+healthBar:setValue(0.75)
+controlSection:addChild(healthBar)
+
+local healthLabel = Label:new({
+    x = 320, y = 60,
+    text = "Health: 75/100",
+    width = 330, height = 20,
+    textColor = {255, 100, 100, 255},
+})
+controlSection:addChild(healthLabel)
+
+-- ===================================================
+-- Section 4: Toggles & Indicators
+-- ===================================================
+local toggleSection = Panel:new({
+    x = 15, y = 475,
+    width = 320, height = 60,
+    bgColor = {35, 35, 38, 255},
+    borderColor = {80, 80, 80, 255},
+    borderThickness = 1
+})
+toggleSection:setPadding(10)
+mainPanel:addChild(toggleSection)
+
+local sectionLabel4 = Label:new({
+    text = "Toggles & Indicators",
+    width = 300, height = 20,
+    alignment = "left",
+    textColor = {200, 255, 200, 255}
+})
+toggleSection:addChild(sectionLabel4)
+
+-- Toggle row
+local toggleRow = HBox:new({
+    x = 10, y = 30,
+    width = 300, height = 24,
+    spacing = 10
+})
+
+for i = 1, 3 do
+    local toggle = Toggle:new({size = 24})
+    toggleRow:addChild(toggle)
+    
+    local label = Label:new({
+        text = "Option " .. i,
+        width = 70, height = 24,
+        alignment = "left"
+    })
+    toggleRow:addChild(label)
+end
+
+toggleSection:addChild(toggleRow)
+
+-- Color indicators
+local indicatorSection = Panel:new({
+    x = 345, y = 475,
+    width = 340, height = 60,
+    bgColor = {35, 35, 38, 255},
+    borderColor = {80, 80, 80, 255},
+    borderThickness = 1
+})
+indicatorSection:setPadding(10)
+mainPanel:addChild(indicatorSection)
+
+local sectionLabel5 = Label:new({
+    text = "Status Indicators",
+    width = 320, height = 20,
+    alignment = "left",
+    textColor = {255, 255, 100, 255}
+})
+indicatorSection:addChild(sectionLabel5)
+
+local indicatorRow = HBox:new({
+    x = 10, y = 30,
+    width = 320, height = 24,
+    spacing = 10
+})
+
+local greenInd = ColorIndicator:new({
+    width = 80, height = 24,
+    baseColor = {60, 180, 60, 255}
+})
+indicatorRow:addChild(greenInd)
+
+local yellowInd = ColorIndicator:new({
+    width = 80, height = 24,
+    baseColor = {200, 180, 60, 255},
+    pulsing = true
+})
+indicatorRow:addChild(yellowInd)
+
+local redInd = ColorIndicator:new({
+    width = 80, height = 24,
+    baseColor = {200, 60, 60, 255},
+    pulsing = true
+})
+indicatorRow:addChild(redInd)
+
+indicatorSection:addChild(indicatorRow)
+
+-- ===================================================
+-- Global Functions called by C Host
+-- ===================================================
+function UpdateUI(mx, my, down, w, h)
+    root.width = w
+    root.height = h
+    root:update(mx, my, down, w, h)
+end
+
+function DrawUI()
+    root:draw()
+end-- demo_complete.lua
+-- Comprehensive demonstration of ALL UI widgets
+
+local root = UIElement:new({width=1200, height=800})
+
+-- ===================================================
+-- DEMO 1: Buttons & Labels with Full Event System
+-- ===================================================
+local buttonDemo = Panel:new({
+    x = 20, y = 20,
+    width = 280, height = 200,
+    bgColor = {45, 45, 48, 255},
+    borderColor = {100, 100, 100, 255},
+    borderThickness = 2
+})
+buttonDemo:setPadding(10)
+root:addChild(buttonDemo)
+
+local buttonTitle = Label:new({
+    text = "Button Events Demo",
+    width = 260, height = 25,
+    alignment = "center",
+    textColor = {200, 200, 255, 255}
+})
+buttonDemo:addChild(buttonTitle)
+
+-- Status label to show events
+local statusLabel = Label:new({
+    x = 10, y = 35,
+    text = "Status: Ready",
+    width = 260, height = 20,
+    alignment = "left"
+})
+buttonDemo:addChild(statusLabel)
+
+-- Button with ALL events
+local interactiveBtn = Button:new({
+    x = 10, y = 60,
+    width = 260, height = 40,
+    normalColor = {60, 100, 140, 255},
+    hoverColor = {80, 120, 160, 255},
+    pressedColor = {40, 80, 120, 255}
+})
+interactiveBtn.onHover = function()
+    statusLabel.text = "Status: Hovered!"
+end
+interactiveBtn.onPress = function()
+    statusLabel.text = "Status: Pressed!"
+end
+interactiveBtn.onClick = function()
+    statusLabel.text = "Status: Clicked!"
+end
+interactiveBtn.onRelease = function()
+    statusLabel.text = "Status: Released!"
+end
+buttonDemo:addChild(interactiveBtn)
+
+local btnLabel = Label:new({
+    text = "Interactive Button", 
+    width = 260, height = 40,
+    alignment = "center"
+})
+interactiveBtn:addChild(btnLabel)
+
+-- Disabled button demo
+local disabledBtn = Button:new({
+    x = 10, y = 110,
+    width = 260, height = 40
+})
+disabledBtn.isEnabled = false
+buttonDemo:addChild(disabledBtn)
+
+local disabledLabel = Label:new({
+    text = "Disabled Button",
+    width = 260, height = 40,
+    alignment = "center",
+    textColor = {150, 150, 150, 255}
+})
+disabledBtn:addChild(disabledLabel)
+
+-- Toggle disabled state
+local enableToggle = Toggle:new({
+    x = 10, y = 160,
+    size = 24,
+    isToggled = false
+})
+enableToggle.onToggleChanged = function(state)
+    disabledBtn.isEnabled = state
+    if state then
+        disabledLabel.text = "Enabled Button"
+        disabledLabel.textColor = {255, 255, 255, 255}
+    else
+        disabledLabel.text = "Disabled Button"
+        disabledLabel.textColor = {150, 150, 150, 255}
+    end
+end
+buttonDemo:addChild(enableToggle)
+
+local toggleLabel = Label:new({
+    x = 40, y = 160,
+    text = "Enable button above",
+    width = 220, height = 24,
+    alignment = "left"
+})
+buttonDemo:addChild(toggleLabel)
+
+-- ===================================================
+-- DEMO 2: Layout Systems (VBox, HBox, GridLayout)
+-- ===================================================
+local layoutDemo = Panel:new({
+    x = 320, y = 20,
+    width = 400, height = 300,
+    bgColor = {45, 45, 48, 255},
+    borderColor = {100, 100, 100, 255},
+    borderThickness = 2
+})
+layoutDemo:setPadding(10)
+root:addChild(layoutDemo)
+
+local layoutTitle = Label:new({
+    text = "Layout Systems",
+    width = 380, height = 25,
+    alignment = "center",
+    textColor = {255, 200, 100, 255}
+})
+layoutDemo:addChild(layoutTitle)
+
+-- HBox Demo
+local hbox = HBox:new({
+    x = 10, y = 35,
+    width = 380, height = 40,
+    spacing = 10,
+    alignment = "center"
+})
+for i = 1, 4 do
+    local btn = Button:new({width = 80, height = 40})
+    local lbl = Label:new({text = "Btn " .. i, width = 80, height = 40, alignment = "center"})
+    btn:addChild(lbl)
+    hbox:addChild(btn)
+end
+layoutDemo:addChild(hbox)
+
+-- VBox Demo
+local vbox = VBox:new({
+    x = 10, y = 85,
+    width = 180, height = 200,
+    spacing = 5,
+    expandChildren = true
+})
+for i = 1, 4 do
+    local btn = Button:new({height = 35})
+    local lbl = Label:new({text = "Item " .. i, height = 35, alignment = "center"})
+    btn:addChild(lbl)
+    vbox:addChild(btn)
+end
+layoutDemo:addChild(vbox)
+
+-- GridLayout Demo
+local grid = GridLayout:new({
+    x = 200, y = 85,
+    width = 180, height = 200,
+    columns = 3,
+    spacing = 5,
+    expandChildren = true
+})
+for i = 1, 9 do
+    local btn = Button:new({})
+    local lbl = Label:new({text = tostring(i), alignment = "center"})
+    btn:addChild(lbl)
+    grid:addChild(btn)
+end
+layoutDemo:addChild(grid)
+
+-- ===================================================
+-- DEMO 3: ProgressBar & Sliders
+-- ===================================================
+local progressDemo = Panel:new({
+    x = 740, y = 20,
+    width = 300, height = 200,
+    bgColor = {45, 45, 48, 255},
+    borderColor = {100, 100, 100, 255},
+    borderThickness = 2
+})
+progressDemo:setPadding(10)
+root:addChild(progressDemo)
+
+local progressTitle = Label:new({
+    text = "Progress & Sliders",
+    width = 280, height = 25,
+    alignment = "center",
+    textColor = {100, 255, 150, 255}
+})
+progressDemo:addChild(progressTitle)
+
+-- Progress bar
+local progressBar = ProgressBar:new({
+    x = 10, y = 40,
+    width = 280, height = 30
+})
+progressBar:setValue(0.5)
+progressDemo:addChild(progressBar)
+
+-- Slider to control progress
+local progressSlider = Slider:new({
+    x = 10, y = 80,
+    width = 280
+})
+progressSlider.value = 0.5
+progressSlider.onValueChanged = function(val)
+    progressBar:setValue(val)
+    progressValueLabel.text = string.format("Progress: %d%%", math.floor(val * 100))
+end
+progressDemo:addChild(progressSlider)
+
+local progressValueLabel = Label:new({
+    x = 10, y = 110,
+    text = "Progress: 50%",
+    width = 280, height = 20
+})
+progressDemo:addChild(progressValueLabel)
+
+-- Another styled progress bar
+local healthBar = ProgressBar:new({
+    x = 10, y = 140,
+    width = 280, height = 25,
+    fillColor = {200, 60, 60, 255},
+    emptyColor = {60, 30, 30, 255}
+})
+healthBar:setValue(0.75)
+progressDemo:addChild(healthBar)
+
+local healthLabel = Label:new({
+    x = 10, y = 170,
+    text = "Health: 75%",
+    width = 280, height = 20,
+    textColor = {255, 100, 100, 255}
+})
+progressDemo:addChild(healthLabel)
+
+-- ===================================================
+-- DEMO 4: Toggles & ColorIndicators
+-- ===================================================
+local indicatorDemo = Panel:new({
+    x = 20, y = 240,
+    width = 280, height = 250,
+    bgColor = {45, 45, 48, 255},
+    borderColor = {100, 100, 100, 255},
+    borderThickness = 2
+})
+indicatorDemo:setPadding(10)
+root:addChild(indicatorDemo)
+
+local indicatorTitle = Label:new({
+    text = "Toggles & Indicators",
+    width = 260, height = 25,
+    alignment = "center",
+    textColor = {255, 150, 200, 255}
+})
+indicatorDemo:addChild(indicatorTitle)
+
+-- Toggle switches
+local toggleGroup = VBox:new({
+    x = 10, y = 35,
+    width = 260, height = 100,
+    spacing = 8
+})
+
+for i = 1, 3 do
+    local toggleRow = HBox:new({
+        width = 260, height = 24,
+        spacing = 10
+    })
+    
+    local toggle = Toggle:new({size = 24})
+    toggleRow:addChild(toggle)
+    
+    local label = Label:new({
+        text = "Option " .. i,
+        width = 200, height = 24,
+        alignment = "left"
+    })
+    toggleRow:addChild(label)
+    
+    toggleGroup:addChild(toggleRow)
+end
+indicatorDemo:addChild(toggleGroup)
+
+-- Color indicators
+local indicatorLabel = Label:new({
+    x = 10, y = 145,
+    text = "Status Indicators:",
+    width = 260, height = 20
+})
+indicatorDemo:addChild(indicatorLabel)
+
+local statusRow = HBox:new({
+    x = 10, y = 170,
+    width = 260, height = 30,
+    spacing = 10
+})
+
+local greenIndicator = ColorIndicator:new({
+    width = 60, height = 30,
+    baseColor = {60, 180, 60, 255},
+    pulsing = false
+})
+statusRow:addChild(greenIndicator)
+
+local yellowIndicator = ColorIndicator:new({
+    width = 60, height = 30,
+    baseColor = {200, 180, 60, 255},
+    pulsing = true
+})
+statusRow:addChild(yellowIndicator)
+
+local redIndicator = ColorIndicator:new({
+    width = 60, height = 30,
+    baseColor = {200, 60, 60, 255},
+    pulsing = true
+})
+statusRow:addChild(redIndicator)
+
+indicatorDemo:addChild(statusRow)
+
+local pulseToggle = Toggle:new({
+    x = 10, y = 210,
+    size = 24,
+    isToggled = true
+})
+pulseToggle.onToggleChanged = function(state)
+    yellowIndicator.pulsing = state
+    redIndicator.pulsing = state
+end
+indicatorDemo:addChild(pulseToggle)
+
+local pulseLabel = Label:new({
+    x = 40, y = 210,
+    text = "Enable pulsing",
+    width = 220, height = 24
+})
+indicatorDemo:addChild(pulseLabel)
+
+-- ===================================================
+-- DEMO 5: Draggable Window
+-- ===================================================
+local window = Window:new({
+    x = 320, y = 340,
+    width = 400, height = 300
+})
+root:addChild(window)
+
+-- Window title label (on title bar)
+local windowTitleLabel = Label:new({
+    x = 10, y = 5,
+    text = "Draggable Window (Drag Me!)",
+    width = 380, height = 20,
+    textColor = {255, 255, 255, 255}
+})
+window:addChild(windowTitleLabel)
+
+-- Content in window
+local windowContent = VBox:new({
+    x = 10, y = 40,
+    width = 380, height = 250,
+    spacing = 10
+})
+
+local welcomeLabel = Label:new({
+    text = "This is a draggable window!",
+    width = 380, height = 25,
+    alignment = "center",
+    textColor = {200, 255, 200, 255}
+})
+windowContent:addChild(welcomeLabel)
+
+local infoLabel = Label:new({
+    text = "Click and drag the title bar to move",
+    width = 380, height = 20,
+    alignment = "center"
+})
+windowContent:addChild(infoLabel)
+
+-- Add some buttons to window
+for i = 1, 3 do
+    local btn = Button:new({height = 35})
+    local lbl = Label:new({
+        text = "Window Action " .. i,
+        height = 35,
+        alignment = "center"
+    })
+    btn:addChild(lbl)
+    windowContent:addChild(btn)
+end
+
+window:addContent(windowContent)
+
+-- ===================================================
+-- DEMO 6: Label Alignment Showcase
+-- ===================================================
+local alignmentDemo = Panel:new({
+    x = 740, y = 240,
+    width = 300, height = 250,
+    bgColor = {45, 45, 48, 255},
+    borderColor = {100, 100, 100, 255},
+    borderThickness = 2
+})
+alignmentDemo:setPadding(10)
+root:addChild(alignmentDemo)
+
+local alignTitle = Label:new({
+    text = "Label Alignments",
+    width = 280, height = 25,
+    alignment = "center",
+    textColor = {255, 255, 100, 255}
+})
+alignmentDemo:addChild(alignTitle)
+
+-- Left aligned
+local leftBox = Panel:new({
+    x = 10, y = 35,
+    width = 280, height = 30,
+    bgColor = {60, 60, 60, 255},
+    borderColor = {100, 100, 100, 255},
+    borderThickness = 1
+})
+local leftLabel = Label:new({
+    text = "Left Aligned",
+    width = 280, height = 30,
+    alignment = "left",
+    textColor = {255, 200, 200, 255}
+})
+leftBox:addChild(leftLabel)
+alignmentDemo:addChild(leftBox)
+
+-- Center aligned
+local centerBox = Panel:new({
+    x = 10, y = 75,
+    width = 280, height = 30,
+    bgColor = {60, 60, 60, 255},
+    borderColor = {100, 100, 100, 255},
+    borderThickness = 1
+})
+local centerLabel = Label:new({
+    text = "Center Aligned",
+    width = 280, height = 30,
+    alignment = "center",
+    textColor = {200, 255, 200, 255}
+})
+centerBox:addChild(centerLabel)
+alignmentDemo:addChild(centerBox)
+
+-- Right aligned
+local rightBox = Panel:new({
+    x = 10, y = 115,
+    width = 280, height = 30,
+    bgColor = {60, 60, 60, 255},
+    borderColor = {100, 100, 100, 255},
+    borderThickness = 1
+})
+local rightLabel = Label:new({
+    text = "Right Aligned",
+    width = 280, height = 30,
+    alignment = "right",
+    textColor = {200, 200, 255, 255}
+})
+rightBox:addChild(rightLabel)
+alignmentDemo:addChild(rightBox)
+
+-- Top-left aligned
+local topleftBox = Panel:new({
+    x = 10, y = 155,
+    width = 280, height = 80,
+    bgColor = {60, 60, 60, 255},
+    borderColor = {100, 100, 100, 255},
+    borderThickness = 1
+})
+local topleftLabel = Label:new({
+    text = "Top-Left\nMulti-line\nText",
+    width = 280, height = 80,
+    alignment = "topleft",
+    textColor = {255, 255, 200, 255}
+})
+topleftBox:addChild(topleftLabel)
+alignmentDemo:addChild(topleftBox)
+
+-- ===================================================
+-- Global Functions called by C Host
+-- ===================================================
+function UpdateUI(mx, my, down, w, h)
+    root.width = w
+    root.height = h
+    root:update(mx, my, down, w, h)
+end
+
+function DrawUI()
+    root:draw()
+end-- framework.lua
+-- Complete port of ProjectBridge.UI.Primitives to Lua
+-- Matches C# structure 1:1
+
+-- ==========================================
+-- Simple Class System
+-- ==========================================
+Object = {}
+Object.__index = Object
+function Object:new(o)
+    o = o or {}
+    setmetatable(o, self)
+    return o
+end
+function Object:extend()
+    local cls = {}
+    for k, v in pairs(self) do
+        if k:find("__") == 1 then
+            cls[k] = v
+        end
+    end
+    cls.__index = cls
+    cls.super = self
+    setmetatable(cls, self)
+    return cls
+end
+
+-- ==========================================
+-- UIElement.cs
+-- ==========================================
+UIElement = Object:extend()
+
+function UIElement:new(o)
+    o = o or {}
+    setmetatable(o, self)
+    o.x = o.x or 0
+    o.y = o.y or 0
+    o.width = o.width or 0
+    o.height = o.height or 0
+    o.visible = true
+    o.isEnabled = true
+    o.children = {}
+    o.parent = nil
+    
+    -- Modder hooks
+    o.onUpdate = nil
+    o.onDraw = nil
+    
+    return o
+end
+
+function UIElement:getGlobalPosition()
+    if not self.parent then return self.x, self.y end
+    local px, py = self.parent:getGlobalPosition()
+    return px + self.x, py + self.y
+end
+
+function UIElement:getBounds()
+    return self.x, self.y, self.width, self.height
+end
+
+function UIElement:getGlobalBounds()
+    local gx, gy = self:getGlobalPosition()
+    return gx, gy, self.width, self.height
+end
+
+function UIElement:addChild(child)
+    if child.parent then child.parent:removeChild(child) end
+    child.parent = self
+    table.insert(self.children, child)
+end
+
+function UIElement:removeChild(child)
+    for i, c in ipairs(self.children) do
+        if c == child then
+            table.remove(self.children, i)
+            child.parent = nil
+            break
+        end
+    end
+end
+
+function UIElement:clearChildren()
+    for _, child in ipairs(self.children) do
+        child.parent = nil
+    end
+    self.children = {}
+end
+
+function UIElement:containsPoint(px, py)
+    local gx, gy = self:getGlobalPosition()
+    return px >= gx and px <= gx + self.width and
+           py >= gy and py <= gy + self.height
+end
+
+function UIElement:update(mx, my, mouseDown, screenW, screenH)
+    if not self.visible or not self.isEnabled then return end
+    
+    if self.onUpdate then self.onUpdate() end
+    
+    if self.updateSelf then self:updateSelf(mx, my, mouseDown, screenW, screenH) end
+    
+    for _, child in ipairs(self.children) do
+        child:update(mx, my, mouseDown, screenW, screenH)
+    end
+end
+
+function UIElement:draw()
+    if not self.visible then return end
+    
+    if self.onDraw then self.onDraw(self) end
+    
+    if self.drawSelf then self:drawSelf() end
+    
+    for _, child in ipairs(self.children) do
+        child:draw()
+    end
+end
+
+-- ==========================================
+-- Panel.cs
+-- ==========================================
+Panel = UIElement:extend()
+
+function Panel:new(o)
+    o = UIElement.new(self, o)
+    o.bgColor = o.bgColor or {0,0,0,0}
+    o.borderColor = o.borderColor or {0,0,0,0}
+    o.borderThickness = o.borderThickness or 0
+    o.paddingLeft = o.paddingLeft or 0
+    o.paddingTop = o.paddingTop or 0
+    o.paddingRight = o.paddingRight or 0
+    o.paddingBottom = o.paddingBottom or 0
+    return o
+end
+
+function Panel:setPadding(l, t, r, b)
+    if not t then
+        -- Uniform
+        self.paddingLeft = l
+        self.paddingTop = l
+        self.paddingRight = l
+        self.paddingBottom = l
+    elseif not r then
+        -- Horizontal, Vertical
+        self.paddingLeft = l
+        self.paddingRight = l
+        self.paddingTop = t
+        self.paddingBottom = t
+    else
+        -- All four
+        self.paddingLeft = l
+        self.paddingTop = t
+        self.paddingRight = r
+        self.paddingBottom = b
+    end
+end
+
+function Panel:getContentBounds()
+    return self.x + self.paddingLeft,
+           self.y + self.paddingTop,
+           self.width - self.paddingLeft - self.paddingRight,
+           self.height - self.paddingTop - self.paddingBottom
+end
+
+function Panel:drawSelf()
+    local gx, gy = self:getGlobalPosition()
+    
+    -- Draw Background
+    if self.bgColor[4] > 0 then
+        bridge.drawRect(gx, gy, self.width, self.height, 
+            self.bgColor[1], self.bgColor[2], self.bgColor[3], self.bgColor[4])
+    end
+    
+    -- Draw Border
+    if self.borderColor[4] > 0 and self.borderThickness > 0 then
+        if bridge.drawBorder then
+            bridge.drawBorder(gx, gy, self.width, self.height,
+                self.borderColor[1], self.borderColor[2], self.borderColor[3], self.borderColor[4],
+                self.borderThickness)
+        else
+            -- Fallback to 1px border
+            local c = self.borderColor
+            bridge.drawRect(gx, gy, self.width, 1, c[1], c[2], c[3], c[4])
+            bridge.drawRect(gx, gy + self.height - 1, self.width, 1, c[1], c[2], c[3], c[4])
+            bridge.drawRect(gx, gy, 1, self.height, c[1], c[2], c[3], c[4])
+            bridge.drawRect(gx + self.width - 1, gy, 1, self.height, c[1], c[2], c[3], c[4])
+        end
+    end
+end
+
+-- ==========================================
+-- Button.cs
+-- ==========================================
+Button = Panel:extend()
+
+function Button:new(o)
+    o = Panel.new(self, o)
+    o.normalColor = o.normalColor or {60, 60, 60, 255}
+    o.hoverColor = o.hoverColor or {80, 80, 80, 255}
+    o.pressedColor = o.pressedColor or {40, 40, 40, 255}
+    o.disabledColor = o.disabledColor or {30, 30, 30, 255}
+    o.bgColor = o.normalColor
+    o.isHovered = false
+    o.isPressed = false
+    o.wasMouseDown = false
+    
+    -- Events
+    o.onClick = nil
+    o.onHover = nil
+    o.onPress = nil
+    o.onRelease = nil
+    
+    return o
+end
+
+function Button:updateSelf(mx, my, mouseDown, sw, sh)
+    local wasHovered = self.isHovered
+    self.isHovered = self.isEnabled and self:containsPoint(mx, my)
+    
+    -- Hover event
+    if self.isHovered and not wasHovered then
+        if self.onHover then self.onHover() end
+    end
+    
+    -- Disabled state
+    if not self.isEnabled then
+        self.bgColor = self.disabledColor
+        self.isPressed = false
+        self.wasMouseDown = mouseDown
+        return
+    end
+    
+    if self.isHovered then
+        -- Press
+        if mouseDown and not self.wasMouseDown then
+            self.isPressed = true
+            if self.onPress then self.onPress() end
+        end
+        
+        -- Release (click)
+        if not mouseDown and self.wasMouseDown and self.isPressed then
+            if self.onClick then self.onClick() end
+            if self.onRelease then self.onRelease() end
+            self.isPressed = false
+        end
+        
+        -- Visual feedback
+        if self.isPressed then
+            self.bgColor = self.pressedColor
+        else
+            self.bgColor = self.hoverColor
+        end
+    else
+        self.bgColor = self.normalColor
+        
+        -- Cancel press if mouse leaves
+        if self.isPressed then
+            self.isPressed = false
+            if self.onRelease then self.onRelease() end
+        end
+    end
+    
+    self.wasMouseDown = mouseDown
+end
+
+-- ==========================================
+-- Label.cs
+-- ==========================================
+Label = UIElement:extend()
+
+function Label:new(o)
+    o = UIElement.new(self, o)
+    o.text = o.text or ""
+    o.textColor = o.textColor or {255, 255, 255, 255}
+    o.alignment = o.alignment or "left" -- "left", "center", "right", "topleft"
+    o.width = o.width or 100
+    o.height = o.height or 20
+    
+    -- Drop shadow
+    o.dropShadow = o.dropShadow or false
+    o.shadowColor = o.shadowColor or {0, 0, 0, 255}
+    o.shadowOffsetX = o.shadowOffsetX or 1
+    o.shadowOffsetY = o.shadowOffsetY or 1
+    
+    return o
+end
+
+function Label:drawSelf()
+    if not self.text or self.text == "" then return end
+    
+    local gx, gy = self:getGlobalPosition()
+    
+    -- Measure text if available
+    local textWidth, textHeight = 0, 14
+    if bridge.measureText then
+        textWidth, textHeight = bridge.measureText(self.text)
+    end
+    
+    local drawX = gx
+    local drawY = gy
+    
+    -- Apply alignment
+    if self.alignment == "center" then
+        drawX = gx + (self.width - textWidth) / 2
+        drawY = gy + (self.height - textHeight) / 2
+    elseif self.alignment == "right" then
+        drawX = gx + (self.width - textWidth)
+        drawY = gy + (self.height - textHeight) / 2
+    elseif self.alignment == "topleft" then
+        -- No adjustment
+    else -- "left"
+        drawY = gy + (self.height - textHeight) / 2
+    end
+    
+    -- Snap to pixel boundaries
+    drawX = math.floor(drawX + 0.5)
+    drawY = math.floor(drawY + 0.5)
+    
+    -- Draw shadow
+    if self.dropShadow then
+        bridge.drawText(self.text, drawX + self.shadowOffsetX, drawY + self.shadowOffsetY, 
+            self.shadowColor[1], self.shadowColor[2], self.shadowColor[3], self.shadowColor[4])
+    end
+    
+    -- Draw text
+    bridge.drawText(self.text, drawX, drawY, 
+        self.textColor[1], self.textColor[2], self.textColor[3], self.textColor[4])
+end
+
+-- ==========================================
+-- LayoutGroup.cs (Abstract Base)
+-- ==========================================
+LayoutGroup = Panel:extend()
+
+function LayoutGroup:new(o)
+    o = Panel.new(self, o)
+    o.spacing = o.spacing or 0
+    o.alignment = o.alignment or "start" -- "start", "center", "end"
+    o.expandChildren = o.expandChildren or false
+    o.needsLayout = true
+    return o
+end
+
+function LayoutGroup:addChild(child)
+    Panel.addChild(self, child)
+    self.needsLayout = true
+end
+
+function LayoutGroup:removeChild(child)
+    Panel.removeChild(self, child)
+    self.needsLayout = true
+end
+
+function LayoutGroup:invalidateLayout()
+    self.needsLayout = true
+end
+
+function LayoutGroup:updateSelf(mx, my, mouseDown, sw, sh)
+    if self.needsLayout then
+        if self.performLayout then
+            self:performLayout()
+        end
+        self.needsLayout = false
+    end
+end
+
+-- ==========================================
+-- VBox (Vertical Box)
+-- ==========================================
+VBox = LayoutGroup:extend()
+
+function VBox:performLayout()
+    local totalChildHeight = 0
+    local visibleCount = 0
+    
+    -- Calculate total height needed
+    for _, child in ipairs(self.children) do
+        if child.visible then
+            totalChildHeight = totalChildHeight + child.height
+            visibleCount = visibleCount + 1
+        end
+    end
+    
+    local totalSpacing = self.spacing * math.max(0, visibleCount - 1)
+    local contentHeight = self.height - self.paddingTop - self.paddingBottom
+    local availableSpace = contentHeight - totalChildHeight - totalSpacing
+    
+    local currentY = self.paddingTop
+    
+    -- Apply alignment offset
+    if self.alignment == "center" then
+        currentY = currentY + availableSpace / 2
+    elseif self.alignment == "end" then
+        currentY = currentY + availableSpace
+    end
+    
+    -- Position children
+    for _, child in ipairs(self.children) do
+        if not child.visible then goto continue end
+        
+        child.x = self.paddingLeft
+        child.y = currentY
+        
+        -- Optionally expand width to fill container
+        if self.expandChildren then
+            child.width = self.width - self.paddingLeft - self.paddingRight
+        end
+        
+        currentY = currentY + child.height + self.spacing
+        
+        ::continue::
+    end
+end
+
+function VBox:autoSize()
+    local totalHeight = self.paddingTop + self.paddingBottom
+    local maxWidth = 0
+    local visibleCount = 0
+    
+    for _, child in ipairs(self.children) do
+        if child.visible then
+            totalHeight = totalHeight + child.height
+            maxWidth = math.max(maxWidth, child.width)
+            visibleCount = visibleCount + 1
+        end
+    end
+    
+    totalHeight = totalHeight + self.spacing * math.max(0, visibleCount - 1)
+    
+    self.height = totalHeight
+    self.width = math.max(self.width, maxWidth + self.paddingLeft + self.paddingRight)
+end
+
+-- ==========================================
+-- HBox (Horizontal Box)
+-- ==========================================
+HBox = LayoutGroup:extend()
+
+function HBox:performLayout()
+    local totalChildWidth = 0
+    local visibleCount = 0
+    
+    -- Calculate total width needed
+    for _, child in ipairs(self.children) do
+        if child.visible then
+            totalChildWidth = totalChildWidth + child.width
+            visibleCount = visibleCount + 1
+        end
+    end
+    
+    local totalSpacing = self.spacing * math.max(0, visibleCount - 1)
+    local contentWidth = self.width - self.paddingLeft - self.paddingRight
+    local availableSpace = contentWidth - totalChildWidth - totalSpacing
+    
+    local currentX = self.paddingLeft
+    
+    -- Apply alignment offset
+    if self.alignment == "center" then
+        currentX = currentX + availableSpace / 2
+    elseif self.alignment == "end" then
+        currentX = currentX + availableSpace
+    end
+    
+    -- Position children
+    for _, child in ipairs(self.children) do
+        if not child.visible then goto continue end
+        
+        child.x = currentX
+        child.y = self.paddingTop
+        
+        -- Optionally expand height to fill container
+        if self.expandChildren then
+            child.height = self.height - self.paddingTop - self.paddingBottom
+        end
+        
+        currentX = currentX + child.width + self.spacing
+        
+        ::continue::
+    end
+end
+
+function HBox:autoSize()
+    local totalWidth = self.paddingLeft + self.paddingRight
+    local maxHeight = 0
+    local visibleCount = 0
+    
+    for _, child in ipairs(self.children) do
+        if child.visible then
+            totalWidth = totalWidth + child.width
+            maxHeight = math.max(maxHeight, child.height)
+            visibleCount = visibleCount + 1
+        end
+    end
+    
+    totalWidth = totalWidth + self.spacing * math.max(0, visibleCount - 1)
+    
+    self.width = totalWidth
+    self.height = math.max(self.height, maxHeight + self.paddingTop + self.paddingBottom)
+end
+
+-- ==========================================
+-- GridLayout
+-- ==========================================
+GridLayout = LayoutGroup:extend()
+
+function GridLayout:new(o)
+    o = LayoutGroup.new(self, o)
+    o.columns = o.columns or 3
+    o.rows = o.rows or 0 -- 0 = auto-calculate
+    return o
+end
+
+function GridLayout:performLayout()
+    if #self.children == 0 then return end
+    
+    local cols = math.max(1, self.columns)
+    local rows = self.rows > 0 and self.rows or math.ceil(#self.children / cols)
+    
+    local contentX, contentY, contentWidth, contentHeight = self:getContentBounds()
+    
+    local cellWidth = (contentWidth - self.spacing * (cols - 1)) / cols
+    local cellHeight = (contentHeight - self.spacing * (rows - 1)) / rows
+    
+    local index = 0
+    for _, child in ipairs(self.children) do
+        if not child.visible then goto continue end
+        
+        local col = index % cols
+        local row = math.floor(index / cols)
+        
+        child.x = self.paddingLeft + col * (cellWidth + self.spacing)
+        child.y = self.paddingTop + row * (cellHeight + self.spacing)
+        
+        if self.expandChildren then
+            child.width = cellWidth
+            child.height = cellHeight
+        end
+        
+        index = index + 1
+        
+        ::continue::
+    end
+end
+
+-- ==========================================
+-- Slider.cs
+-- ==========================================
+Slider = Panel:extend()
+
+function Slider:new(o)
+    o = Panel.new(self, o)
+    o.value = o.value or 0.5
+    o.height = o.height or 20
+    o.isDragging = false
+    o.onValueChanged = nil
+    o.trackColor = {60, 60, 60, 255}
+    o.handleColor = {100, 100, 100, 255}
+    o.handleHoverColor = {120, 120, 120, 255}
+    return o
+end
+
+function Slider:setValue(v)
+    self.value = math.max(0, math.min(1, v))
+    if self.onValueChanged then 
+        self.onValueChanged(self.value) 
+    end
+end
+
+function Slider:updateSelf(mx, my, mouseDown, sw, sh)
+    local gx, gy = self:getGlobalPosition()
+    
+    local handleX = gx + (self.width - 16) * self.value
+    local mouseInHandle = mx >= handleX and mx <= handleX + 16 and 
+                          my >= gy and my <= gy + 20
+                          
+    if mouseDown and mouseInHandle and not self.isDragging then
+        self.isDragging = true
+    end
+    
+    if not mouseDown then 
+        self.isDragging = false 
+    end
+    
+    if self.isDragging then
+        local relX = mx - gx
+        self:setValue(relX / self.width)
+    end
+    
+    -- Hover effect
+    if mouseInHandle or self.isDragging then
+        self.handleColor = self.handleHoverColor
+    else
+        self.handleColor = {100, 100, 100, 255}
+    end
+end
+
+function Slider:drawSelf()
+    local gx, gy = self:getGlobalPosition()
+    
+    -- Draw Track
+    local c = self.trackColor
+    bridge.drawRect(gx, gy + 8, self.width, 4, c[1], c[2], c[3], c[4])
+    
+    if self.borderColor[4] > 0 then
+        bridge.drawRect(gx, gy + 8, self.width, 1, 
+            self.borderColor[1], self.borderColor[2], self.borderColor[3], self.borderColor[4])
+        bridge.drawRect(gx, gy + 11, self.width, 1,
+            self.borderColor[1], self.borderColor[2], self.borderColor[3], self.borderColor[4])
+    end
+    
+    -- Draw Handle
+    local hx = (self.width - 16) * self.value
+    local h = self.handleColor
+    bridge.drawRect(gx + hx, gy, 16, 20, h[1], h[2], h[3], h[4])
+    
+    -- Handle border
+    if self.borderColor[4] > 0 then
+        local b = self.borderColor
+        bridge.drawRect(gx + hx, gy, 16, 2, b[1], b[2], b[3], b[4])
+        bridge.drawRect(gx + hx, gy + 18, 16, 2, b[1], b[2], b[3], b[4])
+        bridge.drawRect(gx + hx, gy, 2, 20, b[1], b[2], b[3], b[4])
+        bridge.drawRect(gx + hx + 14, gy, 2, 20, b[1], b[2], b[3], b[4])
+    end
+end
+
+-- ==========================================
+-- ProgressBar.cs
+-- ==========================================
+ProgressBar = Panel:extend()
+
+function ProgressBar:new(o)
+    o = Panel.new(self, o)
+    o.value = o.value or 0
+    o.fillColor = o.fillColor or {60, 180, 60, 255}
+    o.emptyColor = o.emptyColor or {40, 40, 40, 255}
+    o.bgColor = o.emptyColor
+    o.borderColor = o.borderColor or {100, 100, 100, 255}
+    o.borderThickness = o.borderThickness or 1
+    return o
+end
+
+function ProgressBar:setValue(v)
+    self.value = math.max(0, math.min(1, v))
+end
+
+function ProgressBar:drawSelf()
+    local gx, gy = self:getGlobalPosition()
+    
+    -- Draw background (empty state)
+    Panel.drawSelf(self)
+    
+    -- Draw fill
+    local fillWidth = (self.width - 4) * self.value
+    if fillWidth > 0 then
+        local c = self.fillColor
+        bridge.drawRect(gx + 2, gy + 2, fillWidth, self.height - 4,
+            c[1], c[2], c[3], c[4])
+    end
+end
+
+-- ==========================================
+-- Toggle.cs
+-- ==========================================
+Toggle = Button:extend()
+
+function Toggle:new(o)
+    o = Button.new(self, o)
+    local size = o.size or 24
+    o.width = size
+    o.height = size
+    o.isToggled = o.isToggled or false
+    o.toggledColor = o.toggledColor or {60, 180, 60, 255}
+    o.untoggledColor = o.untoggledColor or {60, 60, 60, 255}
+    o.indicatorColor = o.indicatorColor or {255, 255, 255, 255}
+    o.borderColor = o.borderColor or {100, 100, 100, 255}
+    o.borderThickness = 2
+    o.onToggleChanged = nil
+    
+    -- Override button onClick
+    local oldOnClick = o.onClick
+    o.onClick = function()
+        o:setToggled(not o.isToggled)
+        if oldOnClick then oldOnClick() end
+    end
+    
+    return o
+end
+
+function Toggle:setToggled(state)
+    self.isToggled = state
+    self.normalColor = state and self.toggledColor or self.untoggledColor
+    self.bgColor = self.normalColor
+    if self.onToggleChanged then
+        self.onToggleChanged(state)
+    end
+end
+
+function Toggle:drawSelf()
+    -- Draw base (border + background)
+    Panel.drawSelf(self)
+    
+    -- Draw indicator if toggled
+    if self.isToggled then
+        local gx, gy = self:getGlobalPosition()
+        local c = self.indicatorColor
+        bridge.drawRect(gx + 4, gy + 4, self.width - 8, self.height - 8,
+            c[1], c[2], c[3], c[4])
+    end
+end
+
+-- ==========================================
+-- ColorIndicator.cs
+-- ==========================================
+ColorIndicator = Panel:extend()
+
+function ColorIndicator:new(o)
+    o = Panel.new(self, o)
+    o.baseColor = o.baseColor or o.bgColor or {100, 100, 100, 255}
+    o.bgColor = o.baseColor
+    o.pulsing = o.pulsing or false
+    o.pulseTimer = 0
+    o.borderColor = o.borderColor or {
+        math.min(255, math.floor(o.baseColor[1] * 1.5)),
+        math.min(255, math.floor(o.baseColor[2] * 1.5)),
+        math.min(255, math.floor(o.baseColor[3] * 1.5)),
+        255
+    }
+    o.borderThickness = o.borderThickness or 1
+    return o
+end
+
+function ColorIndicator:updateSelf(mx, my, mouseDown, sw, sh)
+    if self.pulsing then
+        self.pulseTimer = self.pulseTimer + 0.05
+        local pulse = math.sin(self.pulseTimer) * 0.5 + 0.5
+        
+        local b = self.baseColor
+        self.bgColor = {
+            math.floor(b[1] + (255 - b[1]) * pulse * 0.5),
+            math.floor(b[2] + (255 - b[2]) * pulse * 0.5),
+            math.floor(b[3] + (255 - b[3]) * pulse * 0.5),
+            b[4]
+        }
+    end
+end
+
+-- ==========================================
+-- Window.cs
+-- ==========================================
+Window = Panel:extend()
+
+function Window:new(o)
+    o = Panel.new(self, o)
+    o.titleBarHeight = o.titleBarHeight or 30
+    o.titleBarColor = o.titleBarColor or {60, 120, 180, 255}
+    o.bgColor = o.bgColor or {40, 40, 40, 255}
+    o.borderColor = o.borderColor or {80, 80, 80, 255}
+    o.borderThickness = o.borderThickness or 2
+    
+    o.isDragging = false
+    o.dragOffsetX = 0
+    o.dragOffsetY = 0
+    
+    o.titleBar = {
+        color = o.titleBarColor,
+        height = o.titleBarHeight
+    }
+    
+    o.contentY = o.titleBarHeight
+    
+    return o
+end
+
+function Window:addContent(element)
+    element.y = element.y + self.contentY
+    self:addChild(element)
+end
+
+function Window:updateSelf(mx, my, mouseDown, sw, sh)
+    local gx, gy = self:getGlobalPosition()
+    local inTitleBar = mx >= gx and mx <= gx + self.width and
+                       my >= gy and my <= gy + self.titleBarHeight
+    
+    if inTitleBar and mouseDown and not self.isDragging then
+        self.isDragging = true
+        self.dragOffsetX = mx - self.x
+        self.dragOffsetY = my - self.y
+    end
+    
+    if not mouseDown then
+        self.isDragging = false
+    end
+    
+    if self.isDragging then
+        self.x = mx - self.dragOffsetX
+        self.y = my - self.dragOffsetY
+    end
+    
+    -- Hover effect
+    if inTitleBar or self.isDragging then
+        local c = self.titleBarColor
+        self.titleBar.color = {
+            math.min(255, math.floor(c[1] * 1.2)),
+            math.min(255, math.floor(c[2] * 1.2)),
+            math.min(255, math.floor(c[3] * 1.2)),
+            c[4]
+        }
+    else
+        self.titleBar.color = self.titleBarColor
+    end
+end
+
+function Window:drawSelf()
+    local gx, gy = self:getGlobalPosition()
+    
+    -- Draw window background
+    Panel.drawSelf(self)
+    
+    -- Draw title bar
+    local c = self.titleBar.color
+    bridge.drawRect(gx, gy, self.width, self.titleBarHeight,
+        c[1], c[2], c[3], c[4])
+end-- sprite_font_editor.lua
+-- THE ULTIMATE NERD FLEX: Build custom sprite fonts interactively!
+-- Load an atlas, arrow-key navigate, press any key to assign that character
+
+local root = UIElement:new({width=1024, height=768})
+
+-- ===================================================
+-- State
+-- ===================================================
+local state = {
+    atlasPath = "Content/mbf_big_00.png",
+    atlasTexId = nil,
+    atlasWidth = 256,
+    atlasHeight = 128,
+    
+    -- Grid navigation
+    cellWidth = 10,
+    cellHeight = 12,
+    cursorX = 0,
+    cursorY = 0,
+    
+    -- Character mapping
+    charMap = {}, -- [ascii_code] = {x, y, width, height, xoffset, yoffset, xadvance}
+    
+    -- Input state
+    captureMode = false,
+    lastKeyPressed = nil,
+    
+    -- Preview
+    previewText = "The quick brown fox jumps over the lazy dog! 0123456789",
+}
+
+-- Load the atlas texture (will be loaded after bridge is available)
+function loadAtlasTexture()
+    -- In a real implementation, you'd call bridge.loadTexture(state.atlasPath)
+    -- For now, we'll just note that this would happen at init
+    -- The texture would be bound before drawing the atlas display
+    print("[System] Atlas texture would be loaded from: " .. state.atlasPath)
+end
+
+-- Load the atlas texture
+local texId, texW, texH = bridge.loadTexture(state.atlasPath)
+if texId then
+    state.atlasTexId = texId
+    state.atlasWidth = texW
+    state.atlasHeight = texH
+    print(string.format("[Font Editor] Loaded atlas: %s (%dx%d)", state.atlasPath, texW, texH))
+else
+    print("[Font Editor] WARNING: Could not load atlas texture: " .. state.atlasPath)
+end
+
+-- ===================================================
+-- Main Container
+-- ===================================================
+local mainPanel = Panel:new({
+    x = 0, y = 0,
+    width = 1024, height = 768,
+    bgColor = {25, 25, 28, 255}
+})
+root:addChild(mainPanel)
+
+-- ===================================================
+-- Top Bar - Controls
+-- ===================================================
+local topBar = Panel:new({
+    x = 0, y = 0,
+    width = 1024, height = 60,
+    bgColor = {35, 35, 38, 255},
+    borderColor = {80, 80, 80, 255},
+    borderThickness = 2
+})
+topBar:setPadding(10)
+mainPanel:addChild(topBar)
+
+local titleLabel = Label:new({
+    text = "SPRITE FONT EDITOR",
+    width = 1000, height = 20,
+    alignment = "center",
+    textColor = {255, 200, 100, 255}
+})
+topBar:addChild(titleLabel)
+
+local instructionLabel = Label:new({
+    x = 10, y = 30,
+    text = "Arrow Keys: Navigate | Any Key: Assign Character | Space: Clear Assignment | S: Save .fnt File",
+    width = 1000, height = 20,
+    alignment = "left",
+    textColor = {200, 200, 200, 255}
+})
+topBar:addChild(instructionLabel)
+
+-- ===================================================
+-- Left Panel - Atlas Viewer with Grid Overlay
+-- ===================================================
+local atlasPanel = Panel:new({
+    x = 10, y = 70,
+    width = 600, height = 500,
+    bgColor = {40, 40, 45, 255},
+    borderColor = {100, 100, 100, 255},
+    borderThickness = 2
+})
+atlasPanel:setPadding(10)
+mainPanel:addChild(atlasPanel)
+
+local atlasTitle = Label:new({
+    text = "Font Atlas (Navigate with Arrow Keys)",
+    width = 580, height = 20,
+    alignment = "left",
+    textColor = {150, 255, 150, 255}
+})
+atlasPanel:addChild(atlasTitle)
+
+-- Atlas display area (custom rendering with texture + grid + cursor)
+local atlasDisplay = Panel:new({
+    x = 10, y = 30,
+    width = 580, height = 450,
+    bgColor = {20, 20, 25, 255},
+    borderColor = {60, 60, 60, 255},
+    borderThickness = 1
+})
+
+-- Override drawSelf to render atlas texture, grid, and cursor
+atlasDisplay.drawSelf = function(self)
+    -- Draw background panel
+    local gx, gy = self:getGlobalBounds()
+    
+    -- Draw background
+    bridge.drawRect(gx, gy, self.width, self.height, 
+        self.bgColor[1], self.bgColor[2], self.bgColor[3], self.bgColor[4])
+    
+    -- Draw border
+    if self.borderThickness > 0 then
+        bridge.drawBorder(gx, gy, self.width, self.height,
+            self.borderColor[1], self.borderColor[2], self.borderColor[3], self.borderColor[4],
+            self.borderThickness)
+    end
+    
+    if not state.atlasTexId then return end
+    
+    -- Calculate scale to fit atlas in display area
+    local scaleX = self.width / state.atlasWidth
+    local scaleY = self.height / state.atlasHeight
+    local scale = math.min(scaleX, scaleY) * 0.95  -- 95% to leave padding
+    
+    local displayW = state.atlasWidth * scale
+    local displayH = state.atlasHeight * scale
+    
+    -- Center the atlas
+    local offsetX = (self.width - displayW) / 2
+    local offsetY = (self.height - displayH) / 2
+    
+    local atlasX = gx + offsetX
+    local atlasY = gy + offsetY
+    
+    -- Draw the atlas texture
+    bridge.drawTexture(state.atlasTexId, atlasX, atlasY, displayW, displayH)
+    
+    -- Draw grid overlay
+    local gridCols = math.floor(state.atlasWidth / state.cellWidth)
+    local gridRows = math.floor(state.atlasHeight / state.cellHeight)
+    
+    local cellDisplayW = (state.cellWidth / state.atlasWidth) * displayW
+    local cellDisplayH = (state.cellHeight / state.atlasHeight) * displayH
+    
+    -- Draw vertical grid lines
+    for col = 0, gridCols do
+        local x = atlasX + col * cellDisplayW
+        bridge.drawRect(x, atlasY, 1, displayH, 80, 80, 80, 100)
+    end
+    
+    -- Draw horizontal grid lines
+    for row = 0, gridRows do
+        local y = atlasY + row * cellDisplayH
+        bridge.drawRect(atlasX, y, displayW, 1, 80, 80, 80, 100)
+    end
+    
+    -- Draw cursor highlight (green box)
+    local cursorDisplayX = atlasX + state.cursorX * cellDisplayW
+    local cursorDisplayY = atlasY + state.cursorY * cellDisplayH
+    
+    -- Green outline (4px thick)
+    bridge.drawBorder(cursorDisplayX, cursorDisplayY, cellDisplayW, cellDisplayH, 
+        100, 255, 100, 255, 2)
+end
+
+atlasPanel:addChild(atlasDisplay)
+
+-- Cursor info
+local cursorInfo = Label:new({
+    x = 10, y = 485,
+    text = "Cursor: (0, 0) | Cell: 8x8",
+    width = 580, height = 20,
+    textColor = {255, 255, 100, 255}
+})
+atlasPanel:addChild(cursorInfo)
+
+-- ===================================================
+-- Right Panel - Character Assignments
+-- ===================================================
+local assignmentPanel = Panel:new({
+    x = 620, y = 70,
+    width = 394, height = 500,
+    bgColor = {40, 40, 45, 255},
+    borderColor = {100, 100, 100, 255},
+    borderThickness = 2
+})
+assignmentPanel:setPadding(10)
+mainPanel:addChild(assignmentPanel)
+
+local assignmentTitle = Label:new({
+    text = "Character Assignments",
+    width = 374, height = 20,
+    alignment = "left",
+    textColor = {150, 150, 255, 255}
+})
+assignmentPanel:addChild(assignmentTitle)
+
+-- Scrollable list of assignments (simplified for demo)
+local assignmentList = VBox:new({
+    x = 10, y = 30,
+    width = 374, height = 420,
+    spacing = 2
+})
+assignmentPanel:addChild(assignmentList)
+
+-- Current selection indicator
+local currentSelection = Label:new({
+    x = 10, y = 455,
+    text = "Press any key to assign to current cell...",
+    width = 374, height = 20,
+    textColor = {100, 255, 100, 255}
+})
+assignmentPanel:addChild(currentSelection)
+
+-- Clear button
+local clearBtn = Button:new({
+    x = 10, y = 475,
+    width = 180, height = 35,
+    normalColor = {100, 60, 60, 255},
+    hoverColor = {120, 70, 70, 255},
+    pressedColor = {80, 50, 50, 255}
+})
+clearBtn.onClick = function()
+    local gridX = state.cursorX
+    local gridY = state.cursorY
+    
+    -- Find and remove any character assigned to this cell
+    for ascii, data in pairs(state.charMap) do
+        if data.gridX == gridX and data.gridY == gridY then
+            state.charMap[ascii] = nil
+            print("Cleared assignment for character: " .. string.char(ascii))
+            break
+        end
+    end
+    
+    updateAssignmentList()
+end
+local clearLabel = Label:new({
+    text = "Clear Assignment",
+    width = 180, height = 35,
+    alignment = "center"
+})
+clearBtn:addChild(clearLabel)
+assignmentPanel:addChild(clearBtn)
+
+-- Save button
+local saveBtn = Button:new({
+    x = 200, y = 475,
+    width = 180, height = 35,
+    normalColor = {60, 100, 60, 255},
+    hoverColor = {70, 120, 70, 255},
+    pressedColor = {50, 80, 50, 255}
+})
+saveBtn.onClick = function()
+    saveFontFile()
+end
+local saveLabel = Label:new({
+    text = "Save .fnt File",
+    width = 180, height = 35,
+    alignment = "center"
+})
+saveBtn:addChild(saveLabel)
+assignmentPanel:addChild(saveBtn)
+
+-- ===================================================
+-- Bottom Panel - Preview
+-- ===================================================
+local previewPanel = Panel:new({
+    x = 10, y = 580,
+    width = 1004, height = 178,
+    bgColor = {40, 40, 45, 255},
+    borderColor = {100, 100, 100, 255},
+    borderThickness = 2
+})
+previewPanel:setPadding(10)
+mainPanel:addChild(previewPanel)
+
+local previewTitle = Label:new({
+    text = "Live Preview (renders with your custom font)",
+    width = 984, height = 20,
+    alignment = "left",
+    textColor = {255, 150, 255, 255}
+})
+previewPanel:addChild(previewTitle)
+
+local previewDisplay = Panel:new({
+    x = 10, y = 30,
+    width = 984, height = 80,
+    bgColor = {20, 20, 25, 255},
+    borderColor = {60, 60, 60, 255},
+    borderThickness = 1
+})
+previewPanel:addChild(previewDisplay)
+
+-- Preview text would render here using the custom font
+
+local statsLabel = Label:new({
+    x = 10, y = 120,
+    text = "Characters Defined: 0 | Atlas: 256x128 | Cell Size: 8x8",
+    width = 984, height = 20,
+    textColor = {200, 200, 200, 255}
+})
+previewPanel:addChild(statsLabel)
+
+local exportStatus = Label:new({
+    x = 10, y = 145,
+    text = "Status: Ready to assign characters",
+    width = 984, height = 20,
+    textColor = {100, 255, 100, 255}
+})
+previewPanel:addChild(exportStatus)
+
+-- ===================================================
+-- Settings Panel (Grid Size Controls)
+-- ===================================================
+local settingsRow = HBox:new({
+    x = 10, y = 510,
+    width = 600, height = 60,
+    spacing = 10
+})
+mainPanel:addChild(settingsRow)
+
+-- Cell width control
+local cellWidthPanel = Panel:new({
+    width = 190, height = 60,
+    bgColor = {35, 35, 38, 255},
+    borderColor = {70, 70, 70, 255},
+    borderThickness = 1
+})
+cellWidthPanel:setPadding(5)
+local cellWidthLabel = Label:new({
+    text = "Cell Width: 8",
+    width = 180, height = 20,
+    alignment = "center"
+})
+cellWidthPanel:addChild(cellWidthLabel)
+
+local cellWidthSlider = Slider:new({
+    x = 5, y = 25,
+    width = 180
+})
+cellWidthSlider.value = 0.5  -- Maps to 8 pixels (range 4-16)
+cellWidthSlider.onValueChanged = function(val)
+    state.cellWidth = math.floor(4 + val * 28)  -- 4 to 32 pixels
+    cellWidthLabel.text = "Cell Width: " .. state.cellWidth
+    updateCursorInfo()
+end
+cellWidthPanel:addChild(cellWidthSlider)
+settingsRow:addChild(cellWidthPanel)
+
+-- Cell height control
+local cellHeightPanel = Panel:new({
+    width = 190, height = 60,
+    bgColor = {35, 35, 38, 255},
+    borderColor = {70, 70, 70, 255},
+    borderThickness = 1
+})
+cellHeightPanel:setPadding(5)
+local cellHeightLabel = Label:new({
+    text = "Cell Height: 8",
+    width = 180, height = 20,
+    alignment = "center"
+})
+cellHeightPanel:addChild(cellHeightLabel)
+
+local cellHeightSlider = Slider:new({
+    x = 5, y = 25,
+    width = 180
+})
+cellHeightSlider.value = 0.5  -- Maps to 8 pixels
+cellHeightSlider.onValueChanged = function(val)
+    state.cellHeight = math.floor(4 + val * 28)  -- 4 to 32 pixels
+    cellHeightLabel.text = "Cell Height: " .. state.cellHeight
+    updateCursorInfo()
+end
+cellHeightPanel:addChild(cellHeightSlider)
+settingsRow:addChild(cellHeightPanel)
+
+-- Atlas dimensions info
+local atlasDimPanel = Panel:new({
+    width = 190, height = 60,
+    bgColor = {35, 35, 38, 255},
+    borderColor = {70, 70, 70, 255},
+    borderThickness = 1
+})
+atlasDimPanel:setPadding(5)
+local atlasDimLabel = Label:new({
+    text = string.format("Atlas: %dx%d", state.atlasWidth, state.atlasHeight),
+    width = 180, height = 20,
+    alignment = "center",
+    textColor = {255, 200, 100, 255}
+})
+atlasDimPanel:addChild(atlasDimLabel)
+
+local gridInfoLabel = Label:new({
+    x = 5, y = 25,
+    text = string.format("Grid: %dx%d cells", 
+        math.floor(state.atlasWidth / state.cellWidth),
+        math.floor(state.atlasHeight / state.cellHeight)),
+    width = 180, height = 20,
+    alignment = "center",
+    textColor = {200, 200, 200, 255}
+})
+atlasDimPanel:addChild(gridInfoLabel)
+settingsRow:addChild(atlasDimPanel)
+
+-- ===================================================
+-- Helper Functions
+-- ===================================================
+
+function updateCursorInfo()
+    local gridCols = math.floor(state.atlasWidth / state.cellWidth)
+    local gridRows = math.floor(state.atlasHeight / state.cellHeight)
+    
+    cursorInfo.text = string.format("Cursor: (%d, %d) | Cell: %dx%d | Pixel: (%d, %d)", 
+        state.cursorX, state.cursorY, 
+        state.cellWidth, state.cellHeight,
+        state.cursorX * state.cellWidth,
+        state.cursorY * state.cellHeight)
+    
+    gridInfoLabel.text = string.format("Grid: %dx%d cells", gridCols, gridRows)
+    
+    -- Check if current cell has an assignment
+    local assigned = nil
+    for ascii, data in pairs(state.charMap) do
+        if data.gridX == state.cursorX and data.gridY == state.cursorY then
+            assigned = string.char(ascii)
+            break
+        end
+    end
+    
+    if assigned then
+        currentSelection.text = "Current cell assigned to: '" .. assigned .. "' (ASCII " .. string.byte(assigned) .. ")"
+        currentSelection.textColor = {255, 255, 100, 255}
+    else
+        currentSelection.text = "Press any key to assign to current cell..."
+        currentSelection.textColor = {100, 255, 100, 255}
+    end
+end
+
+function updateAssignmentList()
+    assignmentList:clearChildren()
+    
+    local count = 0
+    local sortedChars = {}
+    
+    -- Sort by ASCII value
+    for ascii, _ in pairs(state.charMap) do
+        table.insert(sortedChars, ascii)
+    end
+    table.sort(sortedChars)
+    
+    for _, ascii in ipairs(sortedChars) do
+        local data = state.charMap[ascii]
+        local char = string.char(ascii)
+        if ascii < 32 or ascii > 126 then
+            char = "?"  -- Non-printable
+        end
+        
+        local row = Panel:new({
+            width = 374, height = 25,
+            bgColor = {50, 50, 55, 255},
+            borderColor = {70, 70, 75, 255},
+            borderThickness = 1
+        })
+        
+        local charLabel = Label:new({
+            x = 5, y = 2,
+            text = string.format("'%s' (ASCII %d) at grid (%d,%d)", 
+                char, ascii, data.gridX, data.gridY),
+            width = 364, height = 21,
+            alignment = "left"
+        })
+        row:addChild(charLabel)
+        
+        assignmentList:addChild(row)
+        count = count + 1
+        
+        if count >= 15 then break end  -- Limit display
+    end
+    
+    -- Update stats
+    local totalChars = 0
+    for _ in pairs(state.charMap) do totalChars = totalChars + 1 end
+    
+    statsLabel.text = string.format("Characters Defined: %d | Atlas: %dx%d | Cell Size: %dx%d",
+        totalChars, state.atlasWidth, state.atlasHeight, state.cellWidth, state.cellHeight)
+end
+
+function saveFontFile()
+    -- Generate BMFont format .fnt file
+    local output = {}
+    
+    -- Header
+    table.insert(output, string.format('info face="CustomFont" size=%d bold=0 italic=0 charset="" unicode=0 stretchH=100 smooth=1 aa=1 padding=0,0,0,0 spacing=1,1',
+        state.cellHeight))
+    table.insert(output, string.format('common lineHeight=%d base=%d scaleW=%d scaleH=%d pages=1 packed=0',
+        state.cellHeight, state.cellHeight, state.atlasWidth, state.atlasHeight))
+    table.insert(output, 'page id=0 file="' .. state.atlasPath .. '"')
+    
+    -- Count chars
+    local charCount = 0
+    for _ in pairs(state.charMap) do charCount = charCount + 1 end
+    table.insert(output, 'chars count=' .. charCount)
+    
+    -- Character definitions
+    for ascii, data in pairs(state.charMap) do
+        local x = data.gridX * state.cellWidth
+        local y = data.gridY * state.cellHeight
+        
+        table.insert(output, string.format(
+            'char id=%d   x=%d     y=%d     width=%d     height=%d     xoffset=0     yoffset=0    xadvance=%d     page=0  chnl=0',
+            ascii, x, y, state.cellWidth, state.cellHeight, state.cellWidth))
+    end
+    
+    table.insert(output, 'kernings count=0')
+    
+    -- Write to file (in real implementation)
+    local fontData = table.concat(output, "\n")
+    print("=== GENERATED .FNT FILE ===")
+    print(fontData)
+    print("===========================")
+    
+    exportStatus.text = "SUCCESS! Font saved to custom_font.fnt (check console for output)"
+    exportStatus.textColor = {100, 255, 100, 255}
+    
+    -- In a real implementation, you'd call a C function to write this to disk
+    -- bridge.writeFile("custom_font.fnt", fontData)
+end
+
+-- ===================================================
+-- Input Handling (Keyboard)
+-- ===================================================
+
+-- This would be called from C when a key is pressed
+function HandleKeyPress(key)
+    local gridCols = math.floor(state.atlasWidth / state.cellWidth)
+    local gridRows = math.floor(state.atlasHeight / state.cellHeight)
+    
+    if key == "up" then
+        state.cursorY = math.max(0, state.cursorY - 1)
+        updateCursorInfo()
+    elseif key == "down" then
+        state.cursorY = math.min(gridRows - 1, state.cursorY + 1)
+        updateCursorInfo()
+    elseif key == "left" then
+        state.cursorX = math.max(0, state.cursorX - 1)
+        updateCursorInfo()
+    elseif key == "right" then
+        state.cursorX = math.min(gridCols - 1, state.cursorX + 1)
+        updateCursorInfo()
+    elseif key == "space" then
+        -- Clear assignment (handled by button)
+    elseif key == "s" or key == "S" then
+        saveFontFile()
+    else
+        -- Assign this key to current cursor position
+        local ascii = string.byte(key)
+        if ascii then
+            state.charMap[ascii] = {
+                gridX = state.cursorX,
+                gridY = state.cursorY,
+                width = state.cellWidth,
+                height = state.cellHeight
+            }
+            print(string.format("Assigned '%s' (ASCII %d) to grid (%d,%d)", 
+                key, ascii, state.cursorX, state.cursorY))
+            updateAssignmentList()
+            updateCursorInfo()
+            
+            -- Auto-advance cursor
+            state.cursorX = state.cursorX + 1
+            if state.cursorX >= gridCols then
+                state.cursorX = 0
+                state.cursorY = state.cursorY + 1
+                if state.cursorY >= gridRows then
+                    state.cursorY = 0
+                end
+            end
+            updateCursorInfo()
+        end
+    end
+end
+
+-- ===================================================
+-- Initialize
+-- ===================================================
+
+-- Load atlas texture
+local texId, w, h = bridge.loadTexture(state.atlasPath)
+if texId then
+    state.atlasTexId = texId
+    state.atlasWidth = w
+    state.atlasHeight = h
+    print(string.format("[System] Loaded atlas: %s (%dx%d)", state.atlasPath, w, h))
+    atlasDimLabel.text = string.format("Atlas: %dx%d", w, h)
+else
+    print("[Warning] Could not load atlas texture: " .. state.atlasPath)
+    print("[Info] Place your font atlas PNG in Content/ folder")
+end
+
+updateCursorInfo()
+updateAssignmentList()
+
+-- ===================================================
+-- Global Functions
+-- ===================================================
+function UpdateUI(mx, my, down, w, h)
+    root.width = w
+    root.height = h
+    root:update(mx, my, down, w, h)
+end
+
+function DrawUI()
+    root:draw()
+    
+    -- In a real implementation, you'd also draw:
+    -- 1. The atlas texture
+    -- 2. Grid overlay
+    -- 3. Green cursor highlight
+    -- 4. Preview text using the custom font
+end

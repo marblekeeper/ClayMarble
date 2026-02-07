@@ -313,19 +313,19 @@ function Label:drawSelf()
         drawY = gy + (self.height - textHeight) / 2
     end
     
-    -- Snap to pixel boundaries to avoid sub-pixel rendering artifacts
+    -- Snap to pixel boundaries
     drawX = math.floor(drawX + 0.5)
     drawY = math.floor(drawY + 0.5)
     
     -- Draw shadow
     if self.dropShadow then
-        bridge.drawText(drawX + self.shadowOffsetX, drawY + self.shadowOffsetY, 
-            self.text, self.shadowColor[1], self.shadowColor[2], self.shadowColor[3])
+        bridge.drawText(self.text, drawX + self.shadowOffsetX, drawY + self.shadowOffsetY, 
+            self.shadowColor[1], self.shadowColor[2], self.shadowColor[3], self.shadowColor[4])
     end
     
     -- Draw text
-    bridge.drawText(drawX, drawY, self.text, 
-        self.textColor[1], self.textColor[2], self.textColor[3])
+    bridge.drawText(self.text, drawX, drawY, 
+        self.textColor[1], self.textColor[2], self.textColor[3], self.textColor[4])
 end
 
 -- ==========================================
