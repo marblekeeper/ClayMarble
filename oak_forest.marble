@@ -152,6 +152,28 @@ system WorldStatus {
 }
 
 -- ============================================================
+-- RULES
+-- Multi-effect interaction definitions using the command buffer.
+-- TRIGGER = which verb activates this rule
+-- REQ = which capability the actor needs
+-- COND = conditions that must pass (can have multiple)
+-- DIFFICULTY = d100 threshold
+-- CRIT_FAIL = what happens on critical failure
+-- EFFECT = commands emitted on success (ordered)
+-- ============================================================
+
+rule Rule_Chop {
+    trigger         Chop
+    require_cap     Chop
+    condition       tool_harder_than_layer
+    difficulty      40
+    crit_fail_threshold 15
+    crit_fail_bodypart  RightHand
+    crit_fail_damage    2
+    effect DAMAGE_LAYER target:target amount:1
+}
+
+-- ============================================================
 -- ENTITIES
 -- World population. Each entity is a bag of components.
 -- @references resolve to other entity IDs at init time.
