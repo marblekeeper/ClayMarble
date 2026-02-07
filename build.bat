@@ -21,18 +21,20 @@ taskkill /F /IM test_gen.exe >nul 2>nul
 
 REM === Logic Branching ===
 if "%1"=="ui_test" goto DO_UI_TEST
+if "%1"=="sprite_font_editor" goto DO_SPRITE_FONT_EDITOR
 if "%1"=="test" goto DO_TEST
 if "%1"=="gcc" goto DO_GCC
 if "%1"=="msvc" goto DO_MSVC
 
 :USAGE
-echo Usage: build.bat [msvc^|gcc^|test^|ui_test]
+echo Usage: build.bat [msvc^|gcc^|test^|ui_test^|sprite_font_editor]
 echo.
-echo    msvc       - Build runtime with Visual Studio cl.exe
-echo    gcc        - Build runtime with GCC/MinGW
-echo    test       - Build and run test harness (GCC)
-echo    test msvc  - Build and run test harness (MSVC)
-echo    ui_test    - Build and run Lua UI Demo (SDL2 + EGL + Lua)
+echo    msvc                - Build runtime with Visual Studio cl.exe
+echo    gcc                 - Build runtime with GCC/MinGW
+echo    test                - Build and run test harness (GCC)
+echo    test msvc           - Build and run test harness (MSVC)
+echo    ui_test             - Build and run Lua UI Demo (SDL2 + EGL + Lua)
+echo    sprite_font_editor  - Build and run Sprite Font Editor Tool
 exit /b 1
 
 :DO_UI_TEST
@@ -71,6 +73,64 @@ echo [3/3] Running UI Demo...
 echo ----------------------------------------
 if exist %UI_OUT_NAME% (
     .\%UI_OUT_NAME%
+)
+exit /b 0
+
+:DO_SPRITE_FONT_EDITOR
+echo ================================================
+echo SPRITE FONT EDITOR - INTERNAL USE ONLY
+echo ================================================
+echo.
+echo [1/3] Building Sprite Font Editor (SDL2 + Lua + EGL)...
+REM Compiles the C Host (test_ui.c) and the Graphics Backend (bridge_engine.c) together
+REM Links: SDL2 (Window/Input), Lua (Scripting), EGL/GLESv2 (Rendering)
+gcc -std=c99 -O2 test_ui.c bridge_engine.c -o %UI_OUT_NAME% ^
+    -I. -I"%MSYS_DIR%\include" -I"%MSYS_DIR%\include\SDL2" ^
+    -L"%MSYS_DIR%\lib" ^
+    -lmingw32 -lSDL2main -lSDL2 -l%LUA_LIB% -lm ^
+    -lEGL -lGLESv2 -lopengl32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lversion -luuid -lsetupapi
+
+if %ERRORLEVEL% NEQ 0 ( 
+    echo [ERROR] BUILD FAILED 
+    echo Ensure SDL2, Lua, and ANGLE/EGL packages are installed in MSYS2.
+    exit /b 1 
+)
+
+echo [2/3] Deploying Dependencies...
+REM Copy necessary DLLs to local folder so the EXE can run
+copy /Y "%MSYS_DIR%\bin\SDL2.dll" . >nul
+copy /Y "%MSYS_DIR%\bin\libEGL.dll" . >nul
+copy /Y "%MSYS_DIR%\bin\libGLESv2.dll" . >nul
+copy /Y "%MSYS_DIR%\bin\d3dcompiler_47.dll" . >nul
+copy /Y "%MSYS_DIR%\bin\zlib1.dll" . >nul
+copy /Y "%MSYS_DIR%\bin\libgcc_s_seh-1.dll" . >nul
+copy /Y "%MSYS_DIR%\bin\libstdc++-6.dll" . >nul
+copy /Y "%MSYS_DIR%\bin\libwinpthread-1.dll" . >nul
+
+REM Copy Lua DLL (name varies slightly by distro)
+if exist "%MSYS_DIR%\bin\lua54.dll" copy /Y "%MSYS_DIR%\bin\lua54.dll" . >nul
+if exist "%MSYS_DIR%\bin\lua.dll" copy /Y "%MSYS_DIR%\bin\lua.dll" . >nul
+
+echo.
+echo [3/3] Launching Sprite Font Editor...
+echo ================================================
+echo.
+echo CONTROLS:
+echo   Arrow Keys       - Navigate grid cursor
+echo   Any Key          - Assign character to current cell
+echo   Space            - Clear current cell assignment
+echo   S                - Save .fnt file (outputs to console)
+echo.
+echo WORKFLOW:
+echo   1. Use arrow keys to select a cell in the atlas
+echo   2. Press the character key you want to assign (A, B, 1, 2, etc.)
+echo   3. Cursor auto-advances to next cell
+echo   4. Adjust cell size with sliders if needed
+echo   5. Press 'S' to export BMFont .fnt file
+echo.
+echo ================================================
+if exist %UI_OUT_NAME% (
+    .\%UI_OUT_NAME% sprite_font_editor
 )
 exit /b 0
 

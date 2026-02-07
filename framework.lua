@@ -108,7 +108,7 @@ end
 function UIElement:draw()
     if not self.visible then return end
     
-    if self.onDraw then self.onDraw() end
+    if self.onDraw then self.onDraw(self) end
     
     if self.drawSelf then self:drawSelf() end
     
@@ -312,6 +312,10 @@ function Label:drawSelf()
     else -- "left"
         drawY = gy + (self.height - textHeight) / 2
     end
+    
+    -- Snap to pixel boundaries to avoid sub-pixel rendering artifacts
+    drawX = math.floor(drawX + 0.5)
+    drawY = math.floor(drawY + 0.5)
     
     -- Draw shadow
     if self.dropShadow then
