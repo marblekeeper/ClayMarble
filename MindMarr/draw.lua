@@ -185,8 +185,9 @@ local function drawHUD(mapAreaH)
 
     -- Row 5
     bridge.drawText("Medkits:" .. player.medkits, col1, ly, 255, 100, 100, 255)
-    bridge.drawText("Cells:" .. player.cells .. "/" .. player.cellsNeeded, col1 + 90, ly, K.C.cell[1], K.C.cell[2], K.C.cell[3], 255)
-    bridge.drawText("Kills:" .. player.kills, col1 + 210, ly, 200, 140, 140, 255)
+    bridge.drawText("Keys:" .. player.keycards, col1 + 80, ly, K.C.keycard[1], K.C.keycard[2], K.C.keycard[3], 255)
+    bridge.drawText("Cells:" .. player.cells .. "/" .. player.cellsNeeded, col1 + 140, ly, K.C.cell[1], K.C.cell[2], K.C.cell[3], 255)
+    bridge.drawText("Kills:" .. player.kills, col1 + 260, ly, 200, 140, 140, 255)
 
     -- Message log
     local msgX = W/2 + 20
@@ -247,6 +248,20 @@ function M.drawGame()
         bridge.drawRect(stX + 4, stY + 4, K.TS - 8, K.TS - 8, 60, 50, 25, 255)
     end
 
+    -- Elevator (revealed state)
+    if state.elevator.revealed and util.isVisible(state.elevator.x, state.elevator.y) then
+        local ex = camOX + state.elevator.x * K.TS + sx
+        local ey = camOY + state.elevator.y * K.TS + sy
+        local pulse = sin(game.pulseTimer * 3) * 15 + 100
+        bridge.drawRect(ex + 3, ey + 3, K.TS - 6, K.TS - 6, floor(pulse), floor(pulse * 2.2), 255, 255)
+        bridge.drawRect(ex + 6, ey + 6, K.TS - 12, K.TS - 12, K.C.elevator[1], K.C.elevator[2], K.C.elevator[3], 255)
+        bridge.drawText("E", ex + 8, ey + 6, 255, 255, 255, 255)
+    elseif state.elevator.revealed and util.isSeen(state.elevator.x, state.elevator.y) then
+        local ex = camOX + state.elevator.x * K.TS + sx
+        local ey = camOY + state.elevator.y * K.TS + sy
+        bridge.drawRect(ex + 6, ey + 6, K.TS - 12, K.TS - 12, 40, 80, 100, 255)
+    end
+
     -- Items
     for _, it in ipairs(state.items) do
         if util.isVisible(it.x, it.y) then
@@ -266,6 +281,11 @@ function M.drawGame()
             elseif it.type == "oxygen" then
                 bridge.drawRect(ix + 7, iy + 5, 10, 14, K.C.oxygen[1], K.C.oxygen[2], K.C.oxygen[3], 255)
                 bridge.drawRect(ix + 9, iy + 3, 6, 4, 60, 160, 180, 255)
+            elseif it.type == "keycard" then
+                local glow = sin(game.pulseTimer * 4) * 20 + 220
+                bridge.drawRect(ix + 4, iy + 5, 16, 14, floor(glow), floor(glow * 0.8), 50, 255)
+                bridge.drawRect(ix + 6, iy + 7, 12, 10, K.C.keycard[1], K.C.keycard[2], K.C.keycard[3], 255)
+                bridge.drawRect(ix + 8, iy + 11, 3, 3, 80, 60, 20, 255)
             end
         end
     end

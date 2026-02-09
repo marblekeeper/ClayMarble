@@ -110,8 +110,31 @@ function M.tryMove(dx, dy)
                     player.oxygen = min(100, player.oxygen + o2)
                     util.addMessage("O2 canister: +" .. o2 .. " oxygen", K.C.oxygen[1], K.C.oxygen[2], K.C.oxygen[3])
                     util.spawnParticles(nx * K.TS + K.TS/2, ny * K.TS + K.TS/2, 6, 80, 200, 220, 40, 0.3)
+                elseif it.type == "keycard" then
+                    player.keycards = player.keycards + 1
+                    util.addMessage("KEYCARD found! Can skip a sector via elevator.", K.C.keycard[1], K.C.keycard[2], K.C.keycard[3])
+                    util.spawnParticles(nx * K.TS + K.TS/2, ny * K.TS + K.TS/2, 10, K.C.keycard[1], K.C.keycard[2], K.C.keycard[3], 50, 0.4)
+                    util.screenShake(2, 0.15)
+                    -- Reveal elevator on this floor
+                    state.elevator.revealed = true
                 end
                 table.remove(items, i)
+            end
+        end
+
+        -- Elevator (skip sector if player has keycard)
+        if state.elevator.revealed and nx == state.elevator.x and ny == state.elevator.y then
+            if player.keycards > 0 then
+                local skipTo = min(game.maxSectors, game.sector + 2)
+                player.keycards = player.keycards - 1
+                util.addMessage("Elevator activated! Skipping to sector " .. skipTo .. "...", K.C.elevator[1], K.C.elevator[2], K.C.elevator[3])
+                util.screenShake(4, 0.3)
+                util.spawnParticles(nx * K.TS + K.TS/2, ny * K.TS + K.TS/2, 20, K.C.elevator[1], K.C.elevator[2], K.C.elevator[3], 80, 0.6)
+                game.sector = skipTo
+                M.newFloor()
+                return
+            else
+                util.addMessage("Elevator locked. Need a keycard!", 200, 100, 100)
             end
         end
 
@@ -191,6 +214,7 @@ function M.resetGame()
     player.cellsNeeded = 3
     player.kills = 0; player.critBonus = 5
     player.seen = {}
+    player.keycards = 0
 
     util.addMessage("Arrows: move/attack. M: medkit. Escape Mars alive.", 180, 180, 220)
     util.addMessage("Don't lose your mind. Don't say the word.", 200, 60, 80)

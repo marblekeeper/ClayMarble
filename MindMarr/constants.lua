@@ -28,6 +28,8 @@ local C = {
     whisper   = {160, 50, 70},
     sanity    = {120, 180, 255},
     oxygen    = {80, 200, 220},
+    keycard   = {255, 200, 50},
+    elevator  = {100, 220, 255},
 }
 
 local MINDMARR_SAYS = {

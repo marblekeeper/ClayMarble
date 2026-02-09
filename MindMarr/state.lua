@@ -37,12 +37,14 @@ local player = {
     kills = 0,
     critBonus = 5,
     seen = {},
+    keycards = 0,
 }
 
 local map = {}
 local enemies = {}
 local items = {}
 local shuttle = {x = 0, y = 0}
+local elevator = {x = 0, y = 0, revealed = false}
 
 return {
     game = game,
@@ -51,4 +53,5 @@ return {
     enemies = enemies,
     items = items,
     shuttle = shuttle,
+    elevator = elevator,
 }

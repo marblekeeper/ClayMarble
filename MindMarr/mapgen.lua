@@ -138,6 +138,14 @@ function M.populateFloor(rooms)
     state.shuttle.x = rooms[#rooms].cx
     state.shuttle.y = rooms[#rooms].cy
 
+    -- Place elevator in a random room (not start or end)
+    if #rooms >= 3 then
+        local elevRoom = rooms[rand(2, #rooms - 1)]
+        state.elevator.x = elevRoom.cx
+        state.elevator.y = elevRoom.cy
+        state.elevator.revealed = false
+    end
+
     -- Enemies
     local numEnemies = 3 + game.sector * 2 + rand(0, 2)
     for i = 1, numEnemies do
@@ -182,6 +190,14 @@ function M.populateFloor(rooms)
                 x = rand(room.x, room.x + room.w - 1),
                 y = rand(room.y, room.y + room.h - 1),
                 type = "oxygen",
+            }
+        end
+        -- Keycard spawn (rare, starts appearing sector 2+)
+        if game.sector >= 2 and rand() < 0.12 then
+            items[#items+1] = {
+                x = rand(room.x, room.x + room.w - 1),
+                y = rand(room.y, room.y + room.h - 1),
+                type = "keycard",
             }
         end
     end
