@@ -136,7 +136,7 @@ Hot systems (physics, AI) run at full rate; cold systems (save games, analytics)
 ## Build Instructions
 
 ### Prerequisites
-- GCC 9+ or Clang 10+ (C11 support required)
+- GCC 4.5+ or Clang 3.0+ (C99 support required)
 - SDL2 development libraries
 - OpenGL ES 2.0 headers
 - Make or CMake
@@ -144,15 +144,15 @@ Hot systems (physics, AI) run at full rate; cold systems (save games, analytics)
 ### Native Build
 ```bash
 # Linux
-gcc -std=c11 -Wall -Wextra -O2 main.c -lSDL2 -lGLESv2 -lm -o claymarble
+gcc -std=c99 -Wall -Wextra -O2 main.c -lSDL2 -lGLESv2 -lm -o claymarble
 
 # Windows (MinGW)
-gcc -std=c11 -Wall -Wextra -O2 main.c -lmingw32 -lSDL2main -lSDL2 -lopengl32 -o claymarble.exe
+gcc -std=c99 -Wall -Wextra -O2 main.c -lmingw32 -lSDL2main -lSDL2 -lopengl32 -o claymarble.exe
 ```
 
 ### WebAssembly Build
 ```bash
-emcc -std=c11 -O2 main.c bridge_engine.c \
+emcc -std=c99 -O2 main.c bridge_engine.c \
   -s USE_SDL=2 -s USE_WEBGL2=1 -s FULL_ES2=1 \
   -s ALLOW_MEMORY_GROWTH=1 \
   -o claymarble.html
@@ -184,15 +184,15 @@ This is a personal research project, but feedback on architecture decisions and 
 
 ## License
 
-TBD.
+TBD
 
 ## Acknowledgments
 
-Built on 8+ years of engine iteration, with architectural lessons learned from MarbleEngine, Project Bridge (ECS prototyping), and production game development experience.
+Built on 11+ years of engine iteration, with architectural lessons learned from MarbleEngine (Rust/C++ hybrid), Project Bridge (ECS prototyping), and production game development experience.
 
 ---
 
 **Status**: Active development  
 **Platform**: Windows, Linux, WebAssembly  
-**Language**: C99
+**Language**: C99  
 **Dependencies**: SDL2, OpenGL ES 2.0, Lua 5.4 (optional)
