@@ -188,7 +188,7 @@ TBD
 
 ## Acknowledgments
 
-Built on 11+ years of engine iteration, with architectural lessons learned from MarbleEngine (Rust/C++ hybrid), Project Bridge (ECS prototyping), and production game development experience.
+Built on 8+ years of engine iteration, with architectural lessons learned from MarbleEngine (Rust/C++ hybrid), Project Bridge (ECS prototyping), and production game development experience.
 
 ---
 
