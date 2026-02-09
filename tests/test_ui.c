@@ -171,7 +171,11 @@ int GetValue(const char* line, const char* key) {
 
 void LoadFontFromFile(const char* name) {
     char path[256];
-    sprintf(path, "Content/%s.fnt", name);
+#ifdef __EMSCRIPTEN__
+    sprintf(path, "/assets/Content/%s.fnt", name);
+#else
+    sprintf(path, "assets/Content/%s.fnt", name);
+#endif
     FILE* file = fopen(path, "r");
     if (!file) { printf("[System] Font file not found: %s - Using debug font\n", path); GenerateDebugFont(); return; }
     printf("[System] Loading font from %s...\n", path);
@@ -210,7 +214,11 @@ void LoadFontFromFile(const char* name) {
     fclose(file);
     if (texFilename[0] != '\0') {
         char texPath[512];
-        sprintf(texPath, "Content/%s", texFilename);
+#ifdef __EMSCRIPTEN__
+        sprintf(texPath, "/assets/Content/%s", texFilename);
+#else
+        sprintf(texPath, "assets/Content/%s", texFilename);
+#endif
         int w, h;
         g_activeFont.textureId = LoadTexture(texPath, &w, &h);
         g_activeFont.texWidth = w;
@@ -221,6 +229,12 @@ void LoadFontFromFile(const char* name) {
 }
 
 static int l_draw_rect(lua_State* L) {
+    static int callCount = 0;
+    callCount++;
+    if (callCount == 1) {
+        printf("[System] bridge.drawRect called for the first time!\n");
+    }
+    
     SetBatchTexture(g_whiteTexId);
     float x = (float)luaL_checknumber(L, 1), y = (float)luaL_checknumber(L, 2);
     float w = (float)luaL_checknumber(L, 3), h = (float)luaL_checknumber(L, 4);
@@ -236,6 +250,12 @@ static int l_draw_rect(lua_State* L) {
 }
 
 static int l_draw_text(lua_State* L) {
+    static int callCount = 0;
+    callCount++;
+    if (callCount == 1) {
+        printf("[System] bridge.drawText called for the first time!\n");
+    }
+    
     if (!g_activeFont.loaded) return 0;
     const char* text = luaL_checkstring(L, 1);
     float x = (float)luaL_checknumber(L, 2), y = (float)luaL_checknumber(L, 3);
@@ -447,6 +467,14 @@ int main(int argc, char** argv) {
 
     lua_State* L = luaL_newstate();
     luaL_openlibs(L);
+    
+#ifdef __EMSCRIPTEN__
+    // Emscripten debug: show what files are available
+    printf("[System] Emscripten build - checking virtual filesystem...\n");
+    printf("[System] Attempting to list root directory...\n");
+    // Try to open and list what's in the virtual FS
+#endif
+    
     lua_newtable(L);
     lua_pushcfunction(L, l_draw_rect); lua_setfield(L, -2, "drawRect");
     lua_pushcfunction(L, l_draw_text); lua_setfield(L, -2, "drawText");
@@ -458,18 +486,118 @@ int main(int argc, char** argv) {
     lua_pushcfunction(L, l_getKeyState); lua_setfield(L, -2, "getKeyState");
     lua_setglobal(L, "bridge");
 
-    const char* scriptName = (argc > 1) ? argv[1] : "space_shooter";
+    const char* scriptName = (argc > 1) ? argv[1] : "MindMarr";
     char scriptPath[256];
-    sprintf(scriptPath, "%s.lua", scriptName);
-    if (luaL_dofile(L, "framework.lua") != LUA_OK) {
+    char frameworkPath[256];
+
+#ifdef __EMSCRIPTEN__
+    // Emscripten uses absolute paths in virtual filesystem
+    strcpy(frameworkPath, "/scripts/core/framework.lua");
+#else
+    // Native uses relative paths
+    strcpy(frameworkPath, "scripts/core/framework.lua");
+#endif
+
+    // Set up package paths FIRST
+    if (strcmp(scriptName, "MindMarr") == 0) {
+        lua_getglobal(L, "package");
+        lua_getfield(L, -1, "path");
+        const char* currentPath = lua_tostring(L, -1);
+        char newPath[1024];
+#ifdef __EMSCRIPTEN__
+        snprintf(newPath, sizeof(newPath), "%s;/MindMarr/?.lua;/scripts/core/?.lua", currentPath);
+        sprintf(scriptPath, "/MindMarr/MindMarr.lua");
+#else
+        snprintf(newPath, sizeof(newPath), "%s;MindMarr/?.lua;scripts/core/?.lua", currentPath);
+        sprintf(scriptPath, "MindMarr/MindMarr.lua");
+#endif
+        lua_pop(L, 1);
+        lua_pushstring(L, newPath);
+        lua_setfield(L, -2, "path");
+        lua_pop(L, 1);
+        
+        printf("[System] Lua package.path set for MindMarr\n");
+    } else {
+        lua_getglobal(L, "package");
+        lua_getfield(L, -1, "path");
+        const char* currentPath = lua_tostring(L, -1);
+        char newPath[1024];
+#ifdef __EMSCRIPTEN__
+        snprintf(newPath, sizeof(newPath), "%s;/scripts/demos/?.lua;/scripts/core/?.lua", currentPath);
+        sprintf(scriptPath, "/scripts/demos/%s.lua", scriptName);
+#else
+        snprintf(newPath, sizeof(newPath), "%s;scripts/demos/?.lua;scripts/core/?.lua", currentPath);
+        sprintf(scriptPath, "scripts/demos/%s.lua", scriptName);
+#endif
+        lua_pop(L, 1);
+        lua_pushstring(L, newPath);
+        lua_setfield(L, -2, "path");
+        lua_pop(L, 1);
+    }
+
+    printf("[System] Loading framework.lua...\n");
+    if (luaL_dofile(L, frameworkPath) != LUA_OK) {
         printf("Error loading framework: %s\n", lua_tostring(L, -1));
         return 1;
     }
+    printf("[System] Framework loaded successfully\n");
+
+    printf("[System] Loading %s...\n", scriptPath);
     if (luaL_dofile(L, scriptPath) != LUA_OK) {
         printf("Error loading %s: %s\n", scriptPath, lua_tostring(L, -1));
+        lua_pop(L, 1);
         return 1;
     }
-    printf("[System] Running: %s\n", scriptPath);
+    printf("[System] Script loaded successfully\n");
+    
+    // Debug: Check if game state is accessible
+    if (strcmp(scriptName, "MindMarr") == 0) {
+        lua_getglobal(L, "state");
+        if (lua_istable(L, -1)) {
+            lua_getfield(L, -1, "game");
+            if (lua_istable(L, -1)) {
+                lua_getfield(L, -1, "state");
+                if (lua_isstring(L, -1)) {
+                    printf("[System] MindMarr game.state = '%s'\n", lua_tostring(L, -1));
+                }
+                lua_pop(L, 1);
+            }
+            lua_pop(L, 1);
+        }
+        lua_pop(L, 1);
+    }
+    
+    // Verify required functions exist
+    lua_getglobal(L, "UpdateUI");
+    if (!lua_isfunction(L, -1)) {
+        printf("[ERROR] UpdateUI function not found in %s\n", scriptPath);
+        return 1;
+    }
+    lua_pop(L, 1);
+    
+    lua_getglobal(L, "DrawUI");
+    if (!lua_isfunction(L, -1)) {
+        printf("[ERROR] DrawUI function not found in %s\n", scriptPath);
+        return 1;
+    }
+    lua_pop(L, 1);
+    
+    printf("[System] UpdateUI and DrawUI found - starting main loop\n");
+    
+    // Test that bridge functions work
+    printf("[System] Testing bridge.drawRect availability...\n");
+    lua_getglobal(L, "bridge");
+    if (!lua_istable(L, -1)) {
+        printf("[ERROR] bridge table not found!\n");
+        return 1;
+    }
+    lua_getfield(L, -1, "drawRect");
+    if (!lua_isfunction(L, -1)) {
+        printf("[ERROR] bridge.drawRect not found!\n");
+        return 1;
+    }
+    lua_pop(L, 2);
+    printf("[System] bridge.drawRect verified\n");
 
 #ifdef __EMSCRIPTEN__
     g_loopData.window = window;
@@ -477,9 +605,12 @@ int main(int argc, char** argv) {
     g_loopData.winW = winW;
     g_loopData.winH = winH;
     g_loopData.running = 1;
+    printf("[System] Starting Emscripten main loop\n");
     emscripten_set_main_loop(emscripten_main_loop, 0, 1);
 #else
     int running = 1, mouseX = 0, mouseY = 0, mouseDown = 0;
+    int frameCount = 0;
+    printf("[System] Starting native main loop\n");
     while (running) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -508,18 +639,51 @@ int main(int argc, char** argv) {
         }
         Uint32 buttons = SDL_GetMouseState(&mouseX, &mouseY);
         mouseDown = (buttons & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
+        
+        if (frameCount == 0) {
+            printf("[System] Frame 0: Calling UpdateUI and DrawUI\n");
+        }
+        
         lua_getglobal(L, "UpdateUI");
         lua_pushnumber(L, mouseX); lua_pushnumber(L, mouseY); lua_pushboolean(L, mouseDown);
         lua_pushnumber(L, winW); lua_pushnumber(L, winH);
-        if (lua_pcall(L, 5, 0, 0) != LUA_OK) { printf("Lua Update Error: %s\n", lua_tostring(L, -1)); lua_pop(L, 1); }
+        if (lua_pcall(L, 5, 0, 0) != LUA_OK) { 
+            printf("Lua Update Error: %s\n", lua_tostring(L, -1)); 
+            lua_pop(L, 1); 
+            if (frameCount < 5) {
+                printf("[ERROR] UpdateUI failed on frame %d - stopping\n", frameCount);
+                running = 0;
+                continue;
+            }
+        }
+        
         ClearScreen(0.1f, 0.1f, 0.15f, 1.0f);
         g_uiVertCount = 0;
+        
         lua_getglobal(L, "DrawUI");
-        if (lua_pcall(L, 0, 0, 0) != LUA_OK) { printf("Lua Draw Error: %s\n", lua_tostring(L, -1)); lua_pop(L, 1); }
+        if (lua_pcall(L, 0, 0, 0) != LUA_OK) { 
+            printf("Lua Draw Error: %s\n", lua_tostring(L, -1)); 
+            lua_pop(L, 1); 
+            if (frameCount < 5) {
+                printf("[ERROR] DrawUI failed on frame %d - stopping\n", frameCount);
+                running = 0;
+                continue;
+            }
+        }
         FlushBatch();
         BridgeSwapBuffers();
         SDL_Delay(16);
+        
+        frameCount++;
+        if (frameCount == 1) {
+            printf("[System] Frame 1 completed successfully\n");
+        }
+        if (frameCount == 10) {
+            printf("[System] Frame 10 reached - game is running\n");
+        }
     }
+    
+    printf("[System] Main loop exited - running=%d\n", running);
 #endif
 
     ShutdownEngine();

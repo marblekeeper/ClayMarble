@@ -138,8 +138,8 @@ EXPORT int InitEngine(void* windowHandle, int width, int height) {
     eglMakeCurrent(g_engine.display, g_engine.surface, g_engine.surface, g_engine.context);
     
     // Load Shaders
-    GLuint p2d = CreateShaderProgramFromFiles("Content/Shaders/2d.vert", "Content/Shaders/2d.frag");
-    GLuint p3d = CreateShaderProgramFromFiles("Content/Shaders/3d.vert", "Content/Shaders/3d.frag");
+    GLuint p2d = CreateShaderProgramFromFiles("assets/Content/Shaders/2d.vert", "assets/Content/Shaders/2d.frag");
+    GLuint p3d = CreateShaderProgramFromFiles("assets/Content/Shaders/3d.vert", "assets/Content/Shaders/3d.frag");
     InitShaderState(&g_engine.shader2D, p2d);
     InitShaderState(&g_engine.shader3D, p3d);
     
