@@ -63,6 +63,16 @@ local levelChoices = {
     {name = "+3 Crit Range"},
 }
 
+-- Optional sprite assets (if nil/missing, falls back to procedural rendering)
+local assets = {
+    sprites = {
+        player = "assets/Content/textures/scientist.png",
+        enemy_scientist = "assets/Content/textures/scientist_mindmarr.png",
+        -- Future: add more sprites here
+        -- medkit = "assets/Content/textures/medkit.png",
+    }
+}
+
 return {
     TS = TS,
     MW = MW,
@@ -71,4 +81,5 @@ return {
     MINDMARR_SAYS = MINDMARR_SAYS,
     marsWhispers = marsWhispers,
     levelChoices = levelChoices,
+    assets = assets,
 }

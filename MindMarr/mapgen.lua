@@ -94,10 +94,10 @@ end
 -- Infected templates
 function M.infectedTemplate(sector)
     local templates = {
-        {name="Scientist",    glyph="S", hp=7,  str=30, def=15, dmgMin=1, dmgMax=3, xp=5,  color={180,100,120}},
-        {name="Technician",   glyph="T", hp=10, str=40, def=20, dmgMin=2, dmgMax=4, xp=8,  color={160,80,100}},
-        {name="Security",     glyph="G", hp=14, str=50, def=25, dmgMin=2, dmgMax=5, xp=12, color={200,70,90}},
-        {name="Commander",    glyph="C", hp=20, str=55, def=30, dmgMin=3, dmgMax=7, xp=20, color={220,50,70}},
+        {name="Scientist",    glyph="S", spriteKey="enemy_scientist", hp=7,  str=30, def=15, dmgMin=1, dmgMax=3, xp=5,  color={180,100,120}},
+        {name="Technician",   glyph="T", spriteKey="enemy_scientist", hp=10, str=40, def=20, dmgMin=2, dmgMax=4, xp=8,  color={160,80,100}},
+        {name="Security",     glyph="G", spriteKey="enemy_scientist", hp=14, str=50, def=25, dmgMin=2, dmgMax=5, xp=12, color={200,70,90}},
+        {name="Commander",    glyph="C", spriteKey="enemy_scientist", hp=20, str=55, def=30, dmgMin=3, dmgMax=7, xp=20, color={220,50,70}},
         {name="MarsSpawn",    glyph="M", hp=16, str=60, def=45, dmgMin=3, dmgMax=6, xp=25, color={200,40,60}},
         {name="Hivemind",     glyph="H", hp=35, str=65, def=30, dmgMin=5, dmgMax=10,xp=40, color={180,30,80}},
         {name="MINDMARR",     glyph="@", hp=50, str=75, def=40, dmgMin=6, dmgMax=12,xp=60, color={255,20,50}},
@@ -111,6 +111,7 @@ function M.infectedTemplate(sector)
     return {
         name = t.name,
         glyph = t.glyph,
+        spriteKey = t.spriteKey,
         hp = floor(t.hp * scale),
         maxHp = floor(t.hp * scale),
         str = min(90, floor(t.str + sector * 2)),

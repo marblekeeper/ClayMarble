@@ -7,6 +7,7 @@ local abs, max, min = math.abs, math.max, math.min
 local state = require("state")
 local K = require("constants")
 local util = require("util")
+local assets = require("assets")
 
 local game = state.game
 local player = state.player
@@ -295,11 +296,23 @@ function M.drawGame()
         if e.alive and util.isVisible(e.x, e.y) then
             local ex = camOX + e.x * K.TS + sx
             local ey = camOY + e.y * K.TS + sy
-            local aura = sin(game.pulseTimer * 5 + e.x) * 15
-            bridge.drawRect(ex + 2, ey + 2, K.TS - 4, K.TS - 4,
-                min(255, e.color[1] + floor(aura)), min(255, e.color[2]), min(255, e.color[3]), 255)
-            bridge.drawRect(ex + 5, ey + 5, K.TS - 10, K.TS - 10,
-                min(255, e.color[1]+30), min(255, e.color[2]+20), min(255, e.color[3]+20), 255)
+            
+            -- Try to draw enemy sprite (if spriteKey exists and sprite loads)
+            local drewSprite = false
+            if e.spriteKey then
+                drewSprite = assets.tryDrawSprite(e.spriteKey, ex, ey)
+            end
+            
+            if not drewSprite then
+                -- Fallback: procedural enemy rendering
+                local aura = sin(game.pulseTimer * 5 + e.x) * 15
+                bridge.drawRect(ex + 2, ey + 2, K.TS - 4, K.TS - 4,
+                    min(255, e.color[1] + floor(aura)), min(255, e.color[2]), min(255, e.color[3]), 255)
+                bridge.drawRect(ex + 5, ey + 5, K.TS - 10, K.TS - 10,
+                    min(255, e.color[1]+30), min(255, e.color[2]+20), min(255, e.color[3]+20), 255)
+            end
+            
+            -- HP bar (always show if damaged)
             if e.hp < e.maxHp then
                 local bW = K.TS - 4
                 local hpFrac = e.hp / e.maxHp
@@ -313,10 +326,17 @@ function M.drawGame()
     if game.state ~= "dead" then
         local px_draw = camOX + player.x * K.TS + sx
         local py_draw = camOY + player.y * K.TS + sy
-        bridge.drawRect(px_draw + 2, py_draw + 2, K.TS - 4, K.TS - 4, K.C.player[1], K.C.player[2], K.C.player[3], 255)
-        bridge.drawRect(px_draw + 5, py_draw + 5, K.TS - 10, K.TS - 10, 100, 220, 255, 255)
-        bridge.drawRect(px_draw + 7, py_draw + 6, 10, 5, 20, 60, 80, 255)
-        bridge.drawRect(px_draw + 8, py_draw + 7, 8, 3, 40, 140, 180, 255)
+        
+        -- Try to draw sprite at natural size (16x16), auto-centered in 24x24 tile
+        local drewSprite = assets.tryDrawSprite("player", px_draw, py_draw)
+        
+        if not drewSprite then
+            -- Fallback: procedural player rendering
+            bridge.drawRect(px_draw + 2, py_draw + 2, K.TS - 4, K.TS - 4, K.C.player[1], K.C.player[2], K.C.player[3], 255)
+            bridge.drawRect(px_draw + 5, py_draw + 5, K.TS - 10, K.TS - 10, 100, 220, 255, 255)
+            bridge.drawRect(px_draw + 7, py_draw + 6, 10, 5, 20, 60, 80, 255)
+            bridge.drawRect(px_draw + 8, py_draw + 7, 8, 3, 40, 140, 180, 255)
+        end
     end
 
     -- Particles

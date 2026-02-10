@@ -329,9 +329,9 @@ EXPORT int LoadTexture(const char* path, int* outW, int* outH) {
     if (!data) return 0;
     GLuint tex; glGenTextures(1, &tex); glBindTexture(GL_TEXTURE_2D, tex);
     
-    // FONT FIX: Use LINEAR filtering for PNG font textures (anti-aliased fonts)
-    // Use NEAREST for everything else (pixel-perfect sprites/UI)
-    int useLinear = (strstr(path, ".png") != NULL || strstr(path, ".PNG") != NULL);
+    // Use LINEAR for fonts, NEAREST for sprites/textures
+    // Fonts should be in paths containing "font" or "Font"
+    int useLinear = (strstr(path, "font") != NULL || strstr(path, "Font") != NULL);
     
     if (useLinear) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);

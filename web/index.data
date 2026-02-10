@@ -319,6 +319,84 @@ function M.resetGame()
     M.newFloor()
 end
 
+return M-- assets.lua
+-- MINDMARR: Optional sprite asset loading and rendering
+-- Falls back to procedural rendering if assets unavailable
+
+local K = require("constants")
+
+local M = {}
+
+-- Cache for loaded textures (stores {texture, width, height})
+local textureCache = {}
+
+-- Attempt to load a sprite texture
+-- Returns {texture, width, height} or nil if loading fails
+function M.loadSprite(key)
+    if textureCache[key] ~= nil then
+        return textureCache[key] -- Return cached (could be false for failed loads)
+    end
+    
+    local path = K.assets.sprites[key]
+    if not path then
+        textureCache[key] = false
+        return nil
+    end
+    
+    -- Attempt to load texture via bridge
+    if not bridge or not bridge.loadTexture then
+        textureCache[key] = false
+        return nil
+    end
+    
+    -- loadTexture returns (textureId, width, height)
+    local success, texture, w, h = pcall(bridge.loadTexture, path)
+    if success and texture then
+        textureCache[key] = {texture = texture, width = w or K.TS, height = h or K.TS}
+        return textureCache[key]
+    else
+        textureCache[key] = false
+        return nil
+    end
+end
+
+-- Draw a sprite if available, return true if drawn
+-- x, y: screen coordinates (top-left of tile)
+-- w, h: width and height to draw (optional - uses sprite's natural size if nil)
+-- key: sprite key from K.assets.sprites
+function M.tryDrawSprite(key, x, y, w, h)
+    local spriteData = M.loadSprite(key)
+    if not spriteData or spriteData == false then
+        return false
+    end
+    
+    -- Use natural sprite dimensions if not specified
+    local drawW = w or spriteData.width
+    local drawH = h or spriteData.height
+    
+    -- Center the sprite in the tile if it's smaller than tile size
+    local offsetX = 0
+    local offsetY = 0
+    if not w and drawW < K.TS then
+        offsetX = (K.TS - drawW) / 2
+    end
+    if not h and drawH < K.TS then
+        offsetY = (K.TS - drawH) / 2
+    end
+    
+    if bridge and bridge.drawTexture then
+        bridge.drawTexture(spriteData.texture, x + offsetX, y + offsetY, drawW, drawH)
+        return true
+    end
+    
+    return false
+end
+
+-- Clear texture cache (call on game reset if needed)
+function M.clearCache()
+    textureCache = {}
+end
+
 return M-- combat.lua
 -- MINDMARR: Combat resolution, death checks, enemy AI
 
@@ -550,6 +628,16 @@ local levelChoices = {
     {name = "+3 Crit Range"},
 }
 
+-- Optional sprite assets (if nil/missing, falls back to procedural rendering)
+local assets = {
+    sprites = {
+        player = "assets/Content/textures/scientist.png",
+        enemy_scientist = "assets/Content/textures/scientist_mindmarr.png",
+        -- Future: add more sprites here
+        -- medkit = "assets/Content/textures/medkit.png",
+    }
+}
+
 return {
     TS = TS,
     MW = MW,
@@ -558,6 +646,7 @@ return {
     MINDMARR_SAYS = MINDMARR_SAYS,
     marsWhispers = marsWhispers,
     levelChoices = levelChoices,
+    assets = assets,
 }-- draw.lua
 -- MINDMARR: All rendering
 
@@ -567,6 +656,7 @@ local abs, max, min = math.abs, math.max, math.min
 local state = require("state")
 local K = require("constants")
 local util = require("util")
+local assets = require("assets")
 
 local game = state.game
 local player = state.player
@@ -855,11 +945,23 @@ function M.drawGame()
         if e.alive and util.isVisible(e.x, e.y) then
             local ex = camOX + e.x * K.TS + sx
             local ey = camOY + e.y * K.TS + sy
-            local aura = sin(game.pulseTimer * 5 + e.x) * 15
-            bridge.drawRect(ex + 2, ey + 2, K.TS - 4, K.TS - 4,
-                min(255, e.color[1] + floor(aura)), min(255, e.color[2]), min(255, e.color[3]), 255)
-            bridge.drawRect(ex + 5, ey + 5, K.TS - 10, K.TS - 10,
-                min(255, e.color[1]+30), min(255, e.color[2]+20), min(255, e.color[3]+20), 255)
+            
+            -- Try to draw enemy sprite (if spriteKey exists and sprite loads)
+            local drewSprite = false
+            if e.spriteKey then
+                drewSprite = assets.tryDrawSprite(e.spriteKey, ex, ey)
+            end
+            
+            if not drewSprite then
+                -- Fallback: procedural enemy rendering
+                local aura = sin(game.pulseTimer * 5 + e.x) * 15
+                bridge.drawRect(ex + 2, ey + 2, K.TS - 4, K.TS - 4,
+                    min(255, e.color[1] + floor(aura)), min(255, e.color[2]), min(255, e.color[3]), 255)
+                bridge.drawRect(ex + 5, ey + 5, K.TS - 10, K.TS - 10,
+                    min(255, e.color[1]+30), min(255, e.color[2]+20), min(255, e.color[3]+20), 255)
+            end
+            
+            -- HP bar (always show if damaged)
             if e.hp < e.maxHp then
                 local bW = K.TS - 4
                 local hpFrac = e.hp / e.maxHp
@@ -873,10 +975,17 @@ function M.drawGame()
     if game.state ~= "dead" then
         local px_draw = camOX + player.x * K.TS + sx
         local py_draw = camOY + player.y * K.TS + sy
-        bridge.drawRect(px_draw + 2, py_draw + 2, K.TS - 4, K.TS - 4, K.C.player[1], K.C.player[2], K.C.player[3], 255)
-        bridge.drawRect(px_draw + 5, py_draw + 5, K.TS - 10, K.TS - 10, 100, 220, 255, 255)
-        bridge.drawRect(px_draw + 7, py_draw + 6, 10, 5, 20, 60, 80, 255)
-        bridge.drawRect(px_draw + 8, py_draw + 7, 8, 3, 40, 140, 180, 255)
+        
+        -- Try to draw sprite at natural size (16x16), auto-centered in 24x24 tile
+        local drewSprite = assets.tryDrawSprite("player", px_draw, py_draw)
+        
+        if not drewSprite then
+            -- Fallback: procedural player rendering
+            bridge.drawRect(px_draw + 2, py_draw + 2, K.TS - 4, K.TS - 4, K.C.player[1], K.C.player[2], K.C.player[3], 255)
+            bridge.drawRect(px_draw + 5, py_draw + 5, K.TS - 10, K.TS - 10, 100, 220, 255, 255)
+            bridge.drawRect(px_draw + 7, py_draw + 6, 10, 5, 20, 60, 80, 255)
+            bridge.drawRect(px_draw + 8, py_draw + 7, 8, 3, 40, 140, 180, 255)
+        end
     end
 
     -- Particles
@@ -1014,10 +1123,10 @@ end
 -- Infected templates
 function M.infectedTemplate(sector)
     local templates = {
-        {name="Scientist",    glyph="S", hp=7,  str=30, def=15, dmgMin=1, dmgMax=3, xp=5,  color={180,100,120}},
-        {name="Technician",   glyph="T", hp=10, str=40, def=20, dmgMin=2, dmgMax=4, xp=8,  color={160,80,100}},
-        {name="Security",     glyph="G", hp=14, str=50, def=25, dmgMin=2, dmgMax=5, xp=12, color={200,70,90}},
-        {name="Commander",    glyph="C", hp=20, str=55, def=30, dmgMin=3, dmgMax=7, xp=20, color={220,50,70}},
+        {name="Scientist",    glyph="S", spriteKey="enemy_scientist", hp=7,  str=30, def=15, dmgMin=1, dmgMax=3, xp=5,  color={180,100,120}},
+        {name="Technician",   glyph="T", spriteKey="enemy_scientist", hp=10, str=40, def=20, dmgMin=2, dmgMax=4, xp=8,  color={160,80,100}},
+        {name="Security",     glyph="G", spriteKey="enemy_scientist", hp=14, str=50, def=25, dmgMin=2, dmgMax=5, xp=12, color={200,70,90}},
+        {name="Commander",    glyph="C", spriteKey="enemy_scientist", hp=20, str=55, def=30, dmgMin=3, dmgMax=7, xp=20, color={220,50,70}},
         {name="MarsSpawn",    glyph="M", hp=16, str=60, def=45, dmgMin=3, dmgMax=6, xp=25, color={200,40,60}},
         {name="Hivemind",     glyph="H", hp=35, str=65, def=30, dmgMin=5, dmgMax=10,xp=40, color={180,30,80}},
         {name="MINDMARR",     glyph="@", hp=50, str=75, def=40, dmgMin=6, dmgMax=12,xp=60, color={255,20,50}},
@@ -1031,6 +1140,7 @@ function M.infectedTemplate(sector)
     return {
         name = t.name,
         glyph = t.glyph,
+        spriteKey = t.spriteKey,
         hp = floor(t.hp * scale),
         maxHp = floor(t.hp * scale),
         str = min(90, floor(t.str + sector * 2)),
@@ -1636,7 +1746,13 @@ yùe`f–
 é¦§•;Ö¾îXHõPÊ<~-Ë²ê)òU>Â0~nhñ«ñĞ/4¬xQ®Š zïèFÏÅË®;czyE9ô:´H½‘<UÍŒú ´¨‘x³„[ã§8ë–H|®6’tİ®‰ğˆùf±²KÆ!£ëFb²9‡•3›ÅmNFgÎrfcş‹Æé]Ë6ÿªv¯¹9»@& ’Ôj§lÛÔ¿Ç¢qz×²»êSq®,³ÉLc±Ù¸èuŒG\Ä€hNÑk'Ê¡¢ÆCœv¢HÇbuµh¼(‡æÅZëI“Yó©õ,a½ápß£eY–e}U‘—ãè‹öêKyöÍS_’îs¬xh³uWÎ´5Î®·ùÄ’Ùèò‡Î£|k_²ëµöµ·×Ô};FÇVÖí)Ë}Å€³¦p§°e¼UFºÕHÌu3š3wÆ3×ëjfÀÈÓÈXx§£ñny£ëÏø§îKXÙè¬Wx§ùeç•¹¶›ÇîN4ã"•Ñ‰*0ÂErzÄ€×É‘VŒ5+¹ƒ3ÜŠ£ù!ñwìËlİÌÙÆwÔkY–eY–e}L§¾4¬Äc~+\y)g_©÷Î¶æGëdãeâ†=qÀ½ñ•<aÀûëÛ2’#j”HLŠ	•Ésg~;xgu™İŠµÏ°Nğ:Ç¸“w1X´Vç:a@ºî›²úAãÍâ¯Î+©e"Ü®˜eCøíì}Vê]­s7[Ê€.;tóHÚ€™§ÒLÌîKSæ.ŠlÊŠ¢y2ãE:åJÜYå˜Ñ+’ü€2çÀ|8ª×$ZXh·o]ÃŠ‡äÆŒkYl@QeŞ¹wçt\ÌBwoÚGÄ“ù°˜ıòˆæù¸ØËÈiW|æcáÔÁî4ş11~2aÿ¬s*Gô&òı‰(ÒWjîÕÊ¬—jşh1HŒÕ˜™xh}O!Â^ç"¦Äj]ƒÖİ—©ØÆBb¼ëæ@ëb0»½9Iî8]ÌlÄ0»%º6ÂÚ€d²¹H=½yæÂÎsfF,^ÌŠF»P‹E¹Õ®ÀZ¯ëD×Z]w‡3õZÿŠ~÷&×÷Á}X'M`óY–eY"òãh¬ÕoÁ&’Oï³ÿq½6ñÄøFá21šã+?›°~Aãu+n0è& ?5<uíuíe½ÙÀëšä¨ ˆIŸ0Ñ}Œ‘’G”ar½óÍìıÒÅ¡E&… E#ñuôL¹é²ù¡ó(ÃdÑ}y…[× İaŞl@vWc±½Fû7“#‡¶¯Õ‘Ífäİ?¶Y3ç‡Æ0r#‡‡&‰¬{ç1+r÷£ùe÷eÄìà21 ¸ºˆ…‰µ6 +ÒÙ2qŸ`"ù ¯0–eYÚ*Í™ÛÁÑr1g.ÂÉ'h®6'Ÿ ¹Úœ|‚æjsò	š«ÍÉ'h®6'Ÿ ¹Úœ|‚æjs?½9s;9Ë²¬K½E›«ÍÉ¿¤š«ÍÉ'h®6'Ÿ ¹Úœ|‚æjsò	š«ÍÉ'h®6'Ÿ ¹Úœ|‚æjs?½9s;9Ë²¬+Ó*£mtÆ²Zsï1€òı¨9õè:VGoUfÌÜâfåÅ0à=c6½n”ëŠÕ±£àÈ1Áİ¬ÈÚHÈÚÑèÍ4»‰¢ã«ëñ:Ø°µ!È5­ñƒt5–Ñõfã#“ êa¾L­=NÕñ”GìÌ0È‡æÚqgã£8™ƒCÍ×{E¯ÕÑ;n@ÔH§BÇPSG43²G5­P¾ÎŠ˜íª³ü2ÜhÍèÁEçFã+&,Û¯ó³–ß‹Õû{Ö]£0Ó5ĞH]­±èydM˜5 ½¼2##Ü…;›cvÀYçÍfÕhl«cÔ­V
 Ş¹Y,1ŒÊŞ¿]çñôº§ê°,Ëz©Øí1úˆCŞ5˜¯'5O=ÒGke¸L.?{Ù^ÑÊìx)oêj¬H~™¹Õ¤7å¢c³Øİdf,ó®q‘¹¡]5’çJ~÷ù•xh­½µ+úÈD¸èúèZ+¼Î½Õ€­±ÑµèÚwŸc6¬¡¢ï%èûë‘1à}åVò»Ï­Şp­ñŞß³:£Üõï‡ÔVÔ€U4àHlŞÙÖ¿#é‚½xÛ<ò„ñfk=i@V~ìxó]ÿß[':63à,VXÊ¼ÎE'o3`Ö|W126ŠiS½á¼3—–N?‚‘xÈÜJ7œñOye‹z¦W3 ëædÇ›­…æÂˆgY–eıGhËÿçı{hŸ{ßø•zêœ|‚'Øãf×)Õ¡ÎÉ'xºŞ¯\§P‡:'ŸàifçTêPçä´ksò	6àıÚÈu
 u¨sò	4àÌo¨C“OğtœI½uîg ÷ù*‡J½uÎ²,ëÃRoÑêõ:Ô9ù—ÔSÜêœJêœ|‚6`mN>A¤^‡:'ŸàIş»f×)Õ¡ÎÉ'èX›“OPÁ€™9•:Ô9ùmÀÚœ|‚
-I½uîg ÷ù*‡J½uÎ²,ëÃRoÑæjsò/©æjsò	š«ÍÉ'h®6'Ÿ ¹Úœ|‚æjsò	š«ÍÉ'h®6'Ÿ ¹ÚÜÏ@ïcÎÜNÎ²,ëÃRoÑæjsò/©æjsò	š«ÍÉ'h®6'Ÿ ¹Úœ|‚æjsò	š«ÍÉ'h®6'Ÿ ¹ÚÜÏ@ïcÎÜNÎ²éõÚ`W}ŠÒ"    IEND®B`‚-- ============================================================
+I½uîg ÷ù*‡J½uÎ²,ëÃRoÑæjsò/©æjsò	š«ÍÉ'h®6'Ÿ ¹Úœ|‚æjsò	š«ÍÉ'h®6'Ÿ ¹ÚÜÏ@ïcÎÜNÎ²,ëÃRoÑæjsò/©æjsò	š«ÍÉ'h®6'Ÿ ¹Úœ|‚æjsò	š«ÍÉ'h®6'Ÿ ¹ÚÜÏ@ïcÎÜNÎ²éõÚ`W}ŠÒ"    IEND®B`‚‰PNG
+
+   IHDR         óÿa  IDATx´1nÂ@Eÿ,]"…ÂRŠtTéR#ç Qî‚äI“"gI:*ä»§@¢‰Êë]fKŒ	ÄzGÏÌúc…Ïu‹ÿo;ÿû²>“^·wMÜ>=¼€Õj‰õd|@ëÜ¾'M¼cj×äZ³@áşñiEa sW;6#ÀrXÅïı€¥c±«ìû./#ËRØ«‰ÊŸ”¥)¤#Ü BÁaÜ‡'D@kÚ±ÑoÃŸO?­YWÄˆ€àµÃ,)(Õ ñTğòA[RxCDQLqQØnËC\­¸¸òÖúIRŠ«yYÜ%µ îWw®æÜ:Ü   ÿÿşµ÷   IDAT øúJ!ñ    IEND®B`‚‰PNG
+
+   IHDR         óÿa   îIDATx´O1Â@/¸îêë®¢@¹çÜ_àTğ‘”ˆ&é)xF6»ŒˆâMƒp<²3öŒ¼oÆgö@TL9yÁ7•
+–lN\)S°d3kà}ë!„˜s0Zï)pøúù½£ë|«ÜØÆ4 åˆ5-D‹•Isí{4M8£Zi¡©kX‘æ£™AG„ÑdH˜Í|á—íçÍ
+ÂO¹¡ôñgü< Â‰ƒs3·”ƒ,©¿¢@YVRU¥‹;³ú[2d³ÇÓ©ß|í{òÙd8"åkŸ¸{½  ÿÿ"i|   IDAT ï!B!×+    IEND®B`‚  -- ============================================================
 -- oak_forest.marble -- MarbleScript v0.1
 --
 -- The first .marble file. This is the source-of-truth for the
