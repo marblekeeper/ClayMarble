@@ -94,8 +94,10 @@ end
 -- Infected templates
 function M.infectedTemplate(sector)
     local templates = {
+        {name="MindCrab",     glyph="c", spriteKey="enemy_mindcrab", hp=4,  str=25, def=10, dmgMin=1, dmgMax=2, xp=3,  color={160,90,110},
+         frameCount=4, frameCols=2, frameRows=2, frameWidth=16, frameHeight=16, animFPS=5},
         {name="Scientist",    glyph="S", spriteKey="enemy_scientist", hp=7,  str=30, def=15, dmgMin=1, dmgMax=3, xp=5,  color={180,100,120}},
-        {name="Technician",   glyph="T", spriteKey="enemy_scientist", hp=10, str=40, def=20, dmgMin=2, dmgMax=4, xp=8,  color={160,80,100}},
+        {name="Technician",   glyph="T", spriteKey="Technician", hp=10, str=40, def=20, dmgMin=2, dmgMax=4, xp=8,  color={160,80,100}},
         {name="Security",     glyph="G", spriteKey="enemy_scientist", hp=14, str=50, def=25, dmgMin=2, dmgMax=5, xp=12, color={200,70,90}},
         {name="Commander",    glyph="C", spriteKey="enemy_scientist", hp=20, str=55, def=30, dmgMin=3, dmgMax=7, xp=20, color={220,50,70}},
         {name="MarsSpawn",    glyph="M", hp=16, str=60, def=45, dmgMin=3, dmgMax=6, xp=25, color={200,40,60}},
@@ -103,8 +105,9 @@ function M.infectedTemplate(sector)
         {name="MINDMARR",     glyph="@", hp=50, str=75, def=40, dmgMin=6, dmgMax=12,xp=60, color={255,20,50}},
     }
 
+    -- Force MindCrab availability in sector 1, otherwise normal progression
     local maxIdx = min(#templates, 2 + floor(sector / 2))
-    local minIdx = max(1, maxIdx - 3)
+    local minIdx = (sector == 1) and 1 or max(1, maxIdx - 3)
     local t = templates[rand(minIdx, maxIdx)]
 
     local scale = 1.0 + (sector - 1) * 0.12
@@ -123,6 +126,16 @@ function M.infectedTemplate(sector)
         alive = true,
         sayTimer = 0,
         lastSaid = "",
+        -- Animation fields
+        frameCount = t.frameCount or 1,
+        frameCols = t.frameCols or 1,
+        frameRows = t.frameRows or 1,
+        frameWidth = t.frameWidth or K.TS,
+        frameHeight = t.frameHeight or K.TS,
+        animFPS = t.animFPS or 10,
+        currentFrame = 1,
+        animTimer = 0,
+        animState = "idle",  -- "idle" or "attack"
     }
 end
 

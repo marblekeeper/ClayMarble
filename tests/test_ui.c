@@ -1,4 +1,4 @@
-/* test_ui.c - EMSCRIPTEN COMPATIBLE VERSION */
+/* test_ui.c - EMSCRIPTEN COMPATIBLE VERSION WITH ROBUST AUDIO */
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <emscripten/html5.h>
@@ -9,6 +9,12 @@
 #ifndef __EMSCRIPTEN__
 #include <SDL2/SDL_syswm.h>
 #endif
+
+/* --- Audio Includes (Minimp3) --- */
+#define MINIMP3_IMPLEMENTATION
+#include "minimp3.h"
+#include "minimp3_ex.h"
+
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
@@ -30,6 +36,9 @@ extern int LoadTexture(const char* path, int* outW, int* outH);
 extern void BindTexture(int id);
 extern void SetProjectionMatrix(float* matrix);
 extern void UpdateViewport(int width, int height);
+extern void DrawTextureRegion(int textureId, int texWidth, int texHeight,
+                              float srcX, float srcY, float srcW, float srcH,
+                              float dstX, float dstY, float dstW, float dstH);
 
 /* --- Data Structures --- */
 typedef struct { float x, y; float u, v; unsigned int color; } UIVertex;
@@ -48,6 +57,16 @@ typedef struct {
     Glyph glyphs[256];
     int loaded;
 } Font;
+
+/* --- Audio State --- */
+typedef struct {
+    SDL_AudioStream* stream; // Handles resampling/buffering
+    int playing;
+} AudioState;
+
+AudioState g_audioState = {0};
+SDL_AudioDeviceID g_audioDevice = 0;
+SDL_AudioSpec g_deviceSpec = {0}; // Stores the actual hardware format
 
 /* Global State */
 #define MAX_UI_VERTS 10000
@@ -98,6 +117,92 @@ const unsigned char FONT_DATA[] = {
     0x44,0x28,0x10,0x28,0x44, 0x0C,0x50,0x50,0x50,0x3C, 0x44,0x64,0x54,0x4C,0x44, 0x00,0x08,0x36,0x41,0x00,
     0x00,0x00,0x7F,0x00,0x00, 0x00,0x41,0x36,0x08,0x00, 0x10,0x08,0x08,0x10,0x08, 0x7F,0x7F,0x7F,0x7F,0x7F
 };
+
+/* --- Audio Functions --- */
+
+// SDL calls this on a separate thread when it needs data
+void AudioCallback(void* userdata, Uint8* stream, int len) {
+    AudioState* state = (AudioState*)userdata;
+    
+    // Clear buffer to silence
+    memset(stream, 0, len);
+    
+    if (!state->playing || !state->stream) return;
+    
+    // Pull resampled data from the stream directly into SDL's buffer
+    int available = SDL_AudioStreamAvailable(state->stream);
+    if (available > 0) {
+        int bytesRead = SDL_AudioStreamGet(state->stream, stream, len);
+        
+        // If we drained the stream, we are done
+        if (bytesRead < len) {
+            // We could optionally loop here by reloading the stream if we kept the source
+            // For now, simple one-shot
+            if (SDL_AudioStreamAvailable(state->stream) == 0) {
+                state->playing = 0;
+            }
+        }
+    } else {
+        state->playing = 0;
+    }
+}
+
+// Lua Bridge: playSound(path)
+static int l_playSound(lua_State* L) {
+    const char* path = luaL_checkstring(L, 1);
+    
+    // Load MP3 from disk
+    mp3dec_t mp3d;
+    mp3dec_file_info_t info;
+    
+    if (mp3dec_load(&mp3d, path, &info, NULL, NULL)) {
+        printf("[Audio] Failed to load: %s\n", path);
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    
+    // Lock audio device while we manipulate the stream
+    SDL_LockAudioDevice(g_audioDevice);
+    
+    // Clean up previous stream
+    if (g_audioState.stream) {
+        SDL_FreeAudioStream(g_audioState.stream);
+    }
+    
+    // Create a new stream that converts FROM the MP3 format TO the Device format
+    // This handles Pitch (Sample Rate) and Channels (Mono/Stereo) automatically
+    g_audioState.stream = SDL_NewAudioStream(
+        AUDIO_S16,          // Source Format (minimp3 always outputs S16)
+        info.channels,      // Source Channels (from MP3)
+        info.hz,            // Source Rate (from MP3)
+        g_deviceSpec.format,// Dest Format (Device)
+        g_deviceSpec.channels, // Dest Channels (Device)
+        g_deviceSpec.freq   // Dest Rate (Device)
+    );
+    
+    if (g_audioState.stream) {
+        // Feed the entire decoded buffer into the stream
+        // Note: info.samples is total samples (frames * channels), sizeof(int16) is 2 bytes
+        int res = SDL_AudioStreamPut(g_audioState.stream, info.buffer, info.samples * sizeof(int16_t));
+        if (res == 0) {
+            g_audioState.playing = 1;
+            printf("[Audio] Playing %s (Rate: %dHz -> %dHz)\n", path, info.hz, g_deviceSpec.freq);
+        } else {
+            printf("[Audio] Stream Put failed: %s\n", SDL_GetError());
+        }
+    } else {
+        printf("[Audio] Stream creation failed: %s\n", SDL_GetError());
+    }
+    
+    SDL_UnlockAudioDevice(g_audioDevice);
+    
+    // We can free the raw MP3 buffer now because SDL_AudioStream has made a copy
+    free(info.buffer);
+    
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
 
 void FlushBatch() {
     if (g_uiVertCount > 0) {
@@ -346,6 +451,28 @@ static int l_load_texture(lua_State* L) {
     return 3;
 }
 
+static int l_draw_texture_region(lua_State* L) {
+    int texId = (int)luaL_checknumber(L, 1);
+    int texW = (int)luaL_checknumber(L, 2);
+    int texH = (int)luaL_checknumber(L, 3);
+    float srcX = (float)luaL_checknumber(L, 4);
+    float srcY = (float)luaL_checknumber(L, 5);
+    float srcW = (float)luaL_checknumber(L, 6);
+    float srcH = (float)luaL_checknumber(L, 7);
+    float dstX = (float)luaL_checknumber(L, 8);
+    float dstY = (float)luaL_checknumber(L, 9);
+    float dstW = (float)luaL_checknumber(L, 10);
+    float dstH = (float)luaL_checknumber(L, 11);
+    
+    // Need to flush before changing render state
+    FlushBatch();
+    
+    // Call the native function directly
+    DrawTextureRegion(texId, texW, texH, srcX, srcY, srcW, srcH, dstX, dstY, dstW, dstH);
+    
+    return 0;
+}
+
 static int l_write_file(lua_State* L) {
     const char* path = luaL_checkstring(L, 1);
     const char* data = luaL_checkstring(L, 2);
@@ -442,10 +569,32 @@ void emscripten_main_loop() {
 #endif
 
 int main(int argc, char** argv) {
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) return 1;
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) return 1;
     
     Input_Init();
     
+    /* --- Audio Setup --- */
+    SDL_AudioSpec want;
+    SDL_zero(want);
+    want.freq = 44100;
+    want.format = AUDIO_S16;
+    want.channels = 2;
+    want.samples = 2048;
+    want.callback = AudioCallback;
+    want.userdata = &g_audioState;
+    
+    // We remove the strict flag (last 0 -> SDL_AUDIO_ALLOW_ANY_CHANGE)
+    // so SDL can give us the native hardware rate if needed.
+    // However, for stream simplicity, we'll ask for what we want but capture what we get.
+    g_audioDevice = SDL_OpenAudioDevice(NULL, 0, &want, &g_deviceSpec, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_CHANNELS_CHANGE);
+    
+    if (g_audioDevice == 0) {
+        printf("Failed to open audio: %s\n", SDL_GetError());
+    } else {
+        printf("Audio initialized. Device Rate: %dHz Channels: %d\n", g_deviceSpec.freq, g_deviceSpec.channels);
+        SDL_PauseAudioDevice(g_audioDevice, 0);
+    }
+
     int winW = 1024, winH = 768;
     SDL_Window* window = SDL_CreateWindow("Project Bridge Lua UI", 
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
@@ -483,7 +632,9 @@ int main(int argc, char** argv) {
     lua_pushcfunction(L, l_write_file); lua_setfield(L, -2, "writeFile");
     lua_pushcfunction(L, l_load_texture); lua_setfield(L, -2, "loadTexture");
     lua_pushcfunction(L, l_draw_texture); lua_setfield(L, -2, "drawTexture");
+    lua_pushcfunction(L, l_draw_texture_region); lua_setfield(L, -2, "DrawTextureRegion");
     lua_pushcfunction(L, l_getKeyState); lua_setfield(L, -2, "getKeyState");
+    lua_pushcfunction(L, l_playSound); lua_setfield(L, -2, "playSound"); // New Audio function
     lua_setglobal(L, "bridge");
 
     const char* scriptName = (argc > 1) ? argv[1] : "MindMarr";
@@ -685,6 +836,14 @@ int main(int argc, char** argv) {
     
     printf("[System] Main loop exited - running=%d\n", running);
 #endif
+
+    // Cleanup Audio
+    if (g_audioDevice) {
+        SDL_CloseAudioDevice(g_audioDevice);
+    }
+    if (g_audioState.stream) {
+        SDL_FreeAudioStream(g_audioState.stream);
+    }
 
     ShutdownEngine();
     lua_close(L);

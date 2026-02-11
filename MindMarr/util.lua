@@ -22,7 +22,8 @@ function M.spawnParticles(x, y, count, r, g, b, speed, life)
             life = life * (0.4 + rand() * 0.6),
             maxLife = life,
             r = r, g = g, b = b,
-            size = rand() < 0.3 and 3 or 2,
+            -- UPDATED: Scale particles based on Tile Size (approx 10-15% of a tile)
+            size = rand() < 0.3 and (K.TS * 0.15) or (K.TS * 0.1),
         }
     end
 end

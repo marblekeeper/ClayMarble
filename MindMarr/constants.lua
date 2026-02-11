@@ -1,7 +1,7 @@
 -- constants.lua
 -- MINDMARR: Shared constants, palette, config
 
-local TS = 24
+local TS = 48
 local MW, MH = 30, 22
 
 local C = {
@@ -68,8 +68,14 @@ local assets = {
     sprites = {
         player = "assets/Content/textures/scientist.png",
         enemy_scientist = "assets/Content/textures/scientist_mindmarr.png",
+        enemy_mindcrab = "assets/Content/textures/mind_crab.png",
+        Technician = "assets/Content/textures/scientist_001.png",
         -- Future: add more sprites here
         -- medkit = "assets/Content/textures/medkit.png",
+    },
+        audio = {
+        death = "assets/Content/audio/demo.mp3",
+        sector_theme = "assets/Content/audio/TG_8.mp3"
     }
 }
 

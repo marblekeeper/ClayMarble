@@ -8,6 +8,10 @@ local state = require("state")
 local K = require("constants")
 local util = require("util")
 
+-- Attempt to load the audio module safely
+local audioLoaded, audio = pcall(require, "audio")
+if not audioLoaded then audio = nil end
+
 local game = state.game
 local player = state.player
 
@@ -18,6 +22,13 @@ function M.resolveMelee(attacker, defender, atkName, defName, atkStr, defDef, dm
     local hit = roll <= atkStr
     local crit = false
     if attacker == player then crit = roll <= player.critBonus end
+
+    -- Trigger attack animation for attacking enemy
+    if attacker ~= player and attacker.frameCount and attacker.frameCount > 1 then
+        attacker.animState = "attack"
+        attacker.currentFrame = 2  -- Start attack anim at frame 2
+        attacker.animTimer = 0
+    end
 
     if not hit then
         util.addMessage(atkName .. " > " .. defName .. ": d100=" .. roll .. " vs " .. atkStr .. " MISS", K.C.miss[1], K.C.miss[2], K.C.miss[3])
@@ -96,6 +107,17 @@ function M.checkPlayerDeath()
     if player.hp <= 0 then
         player.hp = 0
         game.state = "dead"
+        
+        -- Play Audio
+        if K.assets.audio and K.assets.audio.death then
+            if audio and audio.play then
+                audio.play(K.assets.audio.death)
+            elseif bridge and bridge.playSound then
+                -- Direct bridge fallback
+                bridge.playSound(K.assets.audio.death)
+            end
+        end
+
         util.addMessage("Your body joins the Mindmarr.", 255, 50, 50)
         util.spawnParticles(player.x * K.TS + K.TS/2, player.y * K.TS + K.TS/2, 40, 200, 30, 50, 150, 1.0)
         util.screenShake(8, 0.4)

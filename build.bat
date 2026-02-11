@@ -64,9 +64,10 @@ echo Done.
 exit /b 0
 
 :DO_UI_TEST
-echo [1/2] Building UI Test Runtime (SDL2 + Lua + EGL)...
+echo [1/2] Building UI Test Runtime (SDL2 + Lua + EGL + Audio)...
 gcc -std=c99 -O2 tests\test_ui.c src\bridge_engine.c src\input_handler.c -o %UI_OUT_NAME% ^
     -Iinclude -Ivendor\ThirdParty\include -I"%MSYS_DIR%\include" -I"%MSYS_DIR%\include\SDL2" ^
+    -Ivendor\minimp3\minimp3 ^
     -L"%MSYS_DIR%\lib" -Lvendor\ThirdParty\bin ^
     -lmingw32 -lSDL2main -lSDL2 -l%LUA_LIB% -lm ^
     -lEGL -lGLESv2 -lopengl32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lversion -luuid -lsetupapi
@@ -90,6 +91,7 @@ echo ================================================
 echo [1/2] Building...
 gcc -std=c99 -O2 tests\test_ui.c src\bridge_engine.c src\input_handler.c -o %UI_OUT_NAME% ^
     -Iinclude -Ivendor\ThirdParty\include -I"%MSYS_DIR%\include" -I"%MSYS_DIR%\include\SDL2" ^
+    -Ivendor\minimp3\minimp3 ^
     -L"%MSYS_DIR%\lib" -Lvendor\ThirdParty\bin ^
     -lmingw32 -lSDL2main -lSDL2 -l%LUA_LIB% -lm ^
     -lEGL -lGLESv2 -lopengl32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lversion -luuid -lsetupapi
@@ -109,6 +111,7 @@ echo ================================================
 echo [1/2] Building...
 gcc -std=c99 -O2 tests\test_ui.c src\bridge_engine.c src\input_handler.c -o %UI_OUT_NAME% ^
     -Iinclude -Ivendor\ThirdParty\include -I"%MSYS_DIR%\include" -I"%MSYS_DIR%\include\SDL2" ^
+    -Ivendor\minimp3\minimp3 ^
     -L"%MSYS_DIR%\lib" -Lvendor\ThirdParty\bin ^
     -lmingw32 -lSDL2main -lSDL2 -l%LUA_LIB% -lm ^
     -lEGL -lGLESv2 -lopengl32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lversion -luuid -lsetupapi
@@ -197,6 +200,7 @@ if exist "scripts" (
 
 call emcc tests\test_ui.c src\bridge_engine.c src\input_handler.c -o web\index.html ^
     -Iinclude -Ivendor\ThirdParty\include -I%LUA_DIR%\src ^
+    -Ivendor\minimp3\minimp3 ^
     %LUA_DIR%\src\liblua_wasm.a ^
     -s USE_SDL=2 ^
     -s FULL_ES2=1 ^

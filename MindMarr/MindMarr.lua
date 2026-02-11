@@ -58,6 +58,27 @@ function UpdateUI(mx, my, down, w, h)
         msg.age = msg.age + dt
     end
 
+    -- Animate enemies every render frame
+    for _, e in ipairs(state.enemies) do
+        if e.alive and e.frameCount and e.frameCount > 1 then
+            e.animTimer = (e.animTimer or 0) + dt
+            local frameTime = 1.0 / (e.animFPS or 5)
+            if e.animTimer >= frameTime then
+                e.animTimer = e.animTimer - frameTime
+                if e.animState == "attack" then
+                    e.currentFrame = e.currentFrame + 1
+                    if e.currentFrame > e.frameCount then
+                        e.animState = "idle"
+                        e.currentFrame = 1
+                    end
+                else
+                    -- Idle: alternate frame 1 and 2
+                    e.currentFrame = (e.currentFrame == 1) and 2 or 1
+                end
+            end
+        end
+    end
+
     -- Title
     if game.state == "title" then
         if keyPressed("space") then actions.resetGame() end

@@ -298,9 +298,15 @@ function M.drawGame()
             local ey = camOY + e.y * K.TS + sy
             
             -- Try to draw enemy sprite (if spriteKey exists and sprite loads)
+            -- UPDATED: Passing K.TS, K.TS to force sprite scaling
             local drewSprite = false
             if e.spriteKey then
-                drewSprite = assets.tryDrawSprite(e.spriteKey, ex, ey)
+                if e.frameCount and e.frameCount > 1 then
+                    drewSprite = assets.tryDrawSprite(e.spriteKey, ex, ey, K.TS, K.TS,
+                        e.currentFrame, e.frameCols, e.frameRows, e.frameWidth, e.frameHeight)
+                else
+                    drewSprite = assets.tryDrawSprite(e.spriteKey, ex, ey, K.TS, K.TS)
+                end
             end
             
             if not drewSprite then
@@ -327,8 +333,9 @@ function M.drawGame()
         local px_draw = camOX + player.x * K.TS + sx
         local py_draw = camOY + player.y * K.TS + sy
         
-        -- Try to draw sprite at natural size (16x16), auto-centered in 24x24 tile
-        local drewSprite = assets.tryDrawSprite("player", px_draw, py_draw)
+        -- Try to draw sprite at natural size (16x16), auto-centered in tile
+        -- UPDATED: Passing K.TS, K.TS to force sprite scaling
+        local drewSprite = assets.tryDrawSprite("player", px_draw, py_draw, K.TS, K.TS)
         
         if not drewSprite then
             -- Fallback: procedural player rendering

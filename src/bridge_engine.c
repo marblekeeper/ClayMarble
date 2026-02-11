@@ -1,7 +1,7 @@
 /*
  * Project Bridge - C Backend
  * Phase 8: Hardening 2D Render State & Resource Management
- * UPDATED: Font texture filtering fix
+ * UPDATED: Font texture filtering fix + drawTextureRegion for sprite sheets
  */
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -380,6 +380,94 @@ EXPORT void SetTextureFilter(int id, int mode) {
 }
 
 EXPORT void BridgeSwapBuffers() { if (g_engine.initialized) eglSwapBuffers(g_engine.display, g_engine.surface); }
+
+// --- Sprite Sheet Support: Draw Texture Region ---
+
+EXPORT void DrawTextureRegion(int textureId, int texWidth, int texHeight,
+                               float srcX, float srcY, float srcW, float srcH,
+                               float dstX, float dstY, float dstW, float dstH) {
+    if (!g_engine.initialized || !g_engine.shader2D.program) return;
+    
+    GLuint tex = (GLuint)textureId;
+    
+    // DEBUG: Always print for first few calls
+    static int callCount = 0;
+    if (callCount < 10) {
+        printf("DrawTextureRegion #%d: tex=%d, texSize=%dx%d, src=(%.1f,%.1f %.1fx%.1f), dst=(%.1f,%.1f %.1fx%.1f)\n",
+               callCount, textureId, texWidth, texHeight, srcX, srcY, srcW, srcH, dstX, dstY, dstW, dstH);
+    }
+    
+    // Calculate UV coordinates (normalized 0-1)
+    float u0 = srcX / (float)texWidth;
+    float v0 = srcY / (float)texHeight;
+    float u1 = (srcX + srcW) / (float)texWidth;
+    float v1 = (srcY + srcH) / (float)texHeight;
+    
+    // DEBUG: Print UV coordinates
+    if (callCount < 10) {
+        printf("  UV calculation: srcX/texW = %.1f/%d = %.3f, (srcX+srcW)/texW = (%.1f+%.1f)/%d = %.3f\n", 
+               srcX, texWidth, u0, srcX, srcW, texWidth, u1);
+        printf("  UV coords: u0=%.3f v0=%.3f u1=%.3f v1=%.3f\n", u0, v0, u1, v1);
+        callCount++;
+    }
+    
+    // Build quad vertices
+    UIVertex vertices[6];
+    unsigned int white = 0xFFFFFFFF;
+    
+    // Triangle 1
+    vertices[0] = (UIVertex){dstX, dstY, u0, v0, white};
+    vertices[1] = (UIVertex){dstX + dstW, dstY, u1, v0, white};
+    vertices[2] = (UIVertex){dstX, dstY + dstH, u0, v1, white};
+    
+    // Triangle 2
+    vertices[3] = (UIVertex){dstX + dstW, dstY, u1, v0, white};
+    vertices[4] = (UIVertex){dstX + dstW, dstY + dstH, u1, v1, white};
+    vertices[5] = (UIVertex){dstX, dstY + dstH, u0, v1, white};
+    
+    // Render using 2D shader
+    ShaderState* shader = &g_engine.shader2D;
+    glUseProgram(shader->program);
+    
+    // Force standard 2D state
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    
+    // Ensure texture mode (not vertex color)
+    glUniform1f(shader->vertexColorMixUniform, 0.0f);
+    
+    // Bind texture
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    
+    // CRITICAL: Set clamp mode to prevent sprite sheet bleeding
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    
+    glUniform1i(shader->textureUniform, 0);
+    
+    // Upload vertices
+    glBindBuffer(GL_ARRAY_BUFFER, g_engine.vbo);
+    glBufferData(GL_ARRAY_BUFFER, 6 * sizeof(UIVertex), vertices, GL_DYNAMIC_DRAW);
+    
+    glEnableVertexAttribArray(shader->posAttrib);
+    glVertexAttribPointer(shader->posAttrib, 2, GL_FLOAT, GL_FALSE, sizeof(UIVertex), (void*)0);
+    glEnableVertexAttribArray(shader->uvAttrib);
+    glVertexAttribPointer(shader->uvAttrib, 2, GL_FLOAT, GL_FALSE, sizeof(UIVertex), (void*)(2 * sizeof(float)));
+    glEnableVertexAttribArray(shader->colorAttrib);
+    glVertexAttribPointer(shader->colorAttrib, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(UIVertex), (void*)(4 * sizeof(float)));
+    
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    
+    glDisableVertexAttribArray(shader->posAttrib);
+    glDisableVertexAttribArray(shader->uvAttrib);
+    glDisableVertexAttribArray(shader->colorAttrib);
+    
+    // Unbind texture to prevent state contamination
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
 
 EXPORT void ShutdownEngine() {
     if (!g_engine.initialized) return;
