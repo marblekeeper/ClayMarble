@@ -105,7 +105,6 @@ function M.infectedTemplate(sector)
         {name="MINDMARR",     glyph="@", hp=50, str=75, def=40, dmgMin=6, dmgMax=12,xp=60, color={255,20,50}},
     }
 
-    -- Force MindCrab availability in sector 1, otherwise normal progression
     local maxIdx = min(#templates, 2 + floor(sector / 2))
     local minIdx = (sector == 1) and 1 or max(1, maxIdx - 3)
     local t = templates[rand(minIdx, maxIdx)]
@@ -126,7 +125,6 @@ function M.infectedTemplate(sector)
         alive = true,
         sayTimer = 0,
         lastSaid = "",
-        -- Animation fields
         frameCount = t.frameCount or 1,
         frameCols = t.frameCols or 1,
         frameRows = t.frameRows or 1,
@@ -135,12 +133,18 @@ function M.infectedTemplate(sector)
         animFPS = t.animFPS or 10,
         currentFrame = 1,
         animTimer = 0,
-        animState = "idle",  -- "idle" or "attack"
+        animState = "idle",
     }
 end
 
+-- Helper to pick content
+local function getContent()
+    local isCorr = rand() < 0.25
+    local list = isCorr and K.lore.corrupted or K.lore.clean
+    return list[rand(1, #list)], isCorr
+end
+
 function M.populateFloor(rooms)
-    -- Clear enemies/items in-place
     local enemies = state.enemies
     for k in pairs(enemies) do enemies[k] = nil end
     local items = state.items
@@ -152,7 +156,6 @@ function M.populateFloor(rooms)
     state.shuttle.x = rooms[#rooms].cx
     state.shuttle.y = rooms[#rooms].cy
 
-    -- Place elevator in a random room (not start or end)
     if #rooms >= 3 then
         local elevRoom = rooms[rand(2, #rooms - 1)]
         state.elevator.x = elevRoom.cx
@@ -160,7 +163,6 @@ function M.populateFloor(rooms)
         state.elevator.revealed = false
     end
 
-    -- Enemies
     local numEnemies = 3 + game.sector * 2 + rand(0, 2)
     for i = 1, numEnemies do
         local room = rooms[rand(2, #rooms)]
@@ -168,20 +170,58 @@ function M.populateFloor(rooms)
         local ey = rand(room.y, room.y + room.h - 1)
         if not (ex == player.x and ey == player.y) and util.tileAt(ex, ey) == 0 then
             local e = M.infectedTemplate(game.sector)
-            e.x = ex
-            e.y = ey
+            e.x = ex; e.y = ey
             enemies[#enemies+1] = e
         end
     end
 
-    -- Items
     for i = 2, #rooms do
         local room = rooms[i]
+        
+        -- Scattered Documents (Random floor)
+        if rand() < 0.25 then
+            local txt, corr = getContent()
+            items[#items+1] = {
+                x = rand(room.x, room.x + room.w - 1),
+                y = rand(room.y, room.y + room.h - 1),
+                type = "scattered_document",
+                spriteKey = "scattered_document",
+                content = txt,
+                isCorrupted = corr
+            }
+        end
+
+        -- Terminals (North Walls Only)
+        -- We scan the room for floor tiles where y-1 is a wall
+        local possibleTerminals = {}
+        for y = room.y, room.y + room.h - 1 do
+            for x = room.x, room.x + room.w - 1 do
+                if util.tileAt(x, y) == 0 and util.tileAt(x, y - 1) == 1 then
+                    table.insert(possibleTerminals, {x=x, y=y})
+                end
+            end
+        end
+
+        if #possibleTerminals > 0 and rand() < 0.3 then
+            local pos = possibleTerminals[rand(1, #possibleTerminals)]
+            local txt, corr = getContent()
+            items[#items+1] = {
+                x = pos.x,
+                y = pos.y,
+                type = "terminal",
+                spriteKey = "terminal",
+                content = txt,
+                isCorrupted = corr
+            }
+        end
+
+        -- Standard Loot
         if rand() < 0.35 then
             items[#items+1] = {
                 x = rand(room.x, room.x + room.w - 1),
                 y = rand(room.y, room.y + room.h - 1),
                 type = "supply",
+                spriteKey = "supply",
                 amount = rand(2, 6) + game.sector,
             }
         end
@@ -190,6 +230,7 @@ function M.populateFloor(rooms)
                 x = rand(room.x, room.x + room.w - 1),
                 y = rand(room.y, room.y + room.h - 1),
                 type = "medkit",
+                spriteKey = "medkit",
             }
         end
         if rand() < 0.15 and player.cells < player.cellsNeeded then
@@ -197,6 +238,7 @@ function M.populateFloor(rooms)
                 x = rand(room.x, room.x + room.w - 1),
                 y = rand(room.y, room.y + room.h - 1),
                 type = "cell",
+                spriteKey = "cell",
             }
         end
         if rand() < 0.2 then
@@ -204,14 +246,15 @@ function M.populateFloor(rooms)
                 x = rand(room.x, room.x + room.w - 1),
                 y = rand(room.y, room.y + room.h - 1),
                 type = "oxygen",
+                spriteKey = "oxygen",
             }
         end
-        -- Keycard spawn (rare, starts appearing sector 2+)
         if game.sector >= 2 and rand() < 0.12 then
             items[#items+1] = {
                 x = rand(room.x, room.x + room.w - 1),
                 y = rand(room.y, room.y + room.h - 1),
                 type = "keycard",
+                spriteKey = "keycard",
             }
         end
     end

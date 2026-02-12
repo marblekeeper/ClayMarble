@@ -234,14 +234,17 @@ function M.drawGame()
     if util.isVisible(state.shuttle.x, state.shuttle.y) then
         local stX = camOX + state.shuttle.x * K.TS + sx
         local stY = camOY + state.shuttle.y * K.TS + sy
-        if game.sector == game.maxSectors then
-            local glow = sin(game.pulseTimer * 3) * 20 + 220
-            bridge.drawRect(stX + 2, stY + 2, K.TS - 4, K.TS - 4, floor(glow), floor(glow * 0.85), 40, 255)
-            bridge.drawRect(stX + 5, stY + 5, K.TS - 10, K.TS - 10, 200, 180, 60, 255)
-            bridge.drawText("^", stX + 8, stY + 4, 255, 255, 200, 255)
-        else
-            bridge.drawRect(stX + 4, stY + 4, K.TS - 8, K.TS - 8, K.C.shuttle[1], K.C.shuttle[2], K.C.shuttle[3], 255)
-            bridge.drawText(">", stX + 8, stY + 5, 255, 240, 180, 255)
+        local drewShuttle = assets.tryDrawSprite("shuttle", stX, stY, K.TS, K.TS)
+        if not drewShuttle then
+            if game.sector == game.maxSectors then
+                local glow = sin(game.pulseTimer * 3) * 20 + 220
+                bridge.drawRect(stX + 2, stY + 2, K.TS - 4, K.TS - 4, floor(glow), floor(glow * 0.85), 40, 255)
+                bridge.drawRect(stX + 5, stY + 5, K.TS - 10, K.TS - 10, 200, 180, 60, 255)
+                bridge.drawText("^", stX + 8, stY + 4, 255, 255, 200, 255)
+            else
+                bridge.drawRect(stX + 4, stY + 4, K.TS - 8, K.TS - 8, K.C.shuttle[1], K.C.shuttle[2], K.C.shuttle[3], 255)
+                bridge.drawText(">", stX + 8, stY + 5, 255, 240, 180, 255)
+            end
         end
     elseif util.isSeen(state.shuttle.x, state.shuttle.y) then
         local stX = camOX + state.shuttle.x * K.TS + sx
@@ -249,14 +252,17 @@ function M.drawGame()
         bridge.drawRect(stX + 4, stY + 4, K.TS - 8, K.TS - 8, 60, 50, 25, 255)
     end
 
-    -- Elevator (revealed state)
+    -- Elevator
     if state.elevator.revealed and util.isVisible(state.elevator.x, state.elevator.y) then
         local ex = camOX + state.elevator.x * K.TS + sx
         local ey = camOY + state.elevator.y * K.TS + sy
-        local pulse = sin(game.pulseTimer * 3) * 15 + 100
-        bridge.drawRect(ex + 3, ey + 3, K.TS - 6, K.TS - 6, floor(pulse), floor(pulse * 2.2), 255, 255)
-        bridge.drawRect(ex + 6, ey + 6, K.TS - 12, K.TS - 12, K.C.elevator[1], K.C.elevator[2], K.C.elevator[3], 255)
-        bridge.drawText("E", ex + 8, ey + 6, 255, 255, 255, 255)
+        local drewElevator = assets.tryDrawSprite("elevator", ex, ey, K.TS, K.TS)
+        if not drewElevator then
+            local pulse = sin(game.pulseTimer * 3) * 15 + 100
+            bridge.drawRect(ex + 3, ey + 3, K.TS - 6, K.TS - 6, floor(pulse), floor(pulse * 2.2), 255, 255)
+            bridge.drawRect(ex + 6, ey + 6, K.TS - 12, K.TS - 12, K.C.elevator[1], K.C.elevator[2], K.C.elevator[3], 255)
+            bridge.drawText("E", ex + 8, ey + 6, 255, 255, 255, 255)
+        end
     elseif state.elevator.revealed and util.isSeen(state.elevator.x, state.elevator.y) then
         local ex = camOX + state.elevator.x * K.TS + sx
         local ey = camOY + state.elevator.y * K.TS + sy
@@ -268,25 +274,42 @@ function M.drawGame()
         if util.isVisible(it.x, it.y) then
             local ix = camOX + it.x * K.TS + sx
             local iy = camOY + it.y * K.TS + sy
-            if it.type == "supply" then
-                bridge.drawRect(ix + 7, iy + 7, 10, 10, K.C.supply[1], K.C.supply[2], K.C.supply[3], 255)
-                bridge.drawRect(ix + 9, iy + 9, 5, 5, 140, 255, 180, 255)
-            elseif it.type == "medkit" then
-                bridge.drawRect(ix + 6, iy + 6, 12, 12, 255, 80, 80, 255)
-                bridge.drawRect(ix + 10, iy + 7, 4, 10, 255, 255, 255, 255)
-                bridge.drawRect(ix + 7, iy + 10, 10, 4, 255, 255, 255, 255)
-            elseif it.type == "cell" then
-                local cg = sin(game.pulseTimer * 4) * 40 + 180
-                bridge.drawRect(ix + 5, iy + 4, 14, 16, floor(cg), 50, floor(cg * 1.1), 255)
-                bridge.drawRect(ix + 8, iy + 7, 8, 10, 220, 80, 240, 255)
-            elseif it.type == "oxygen" then
-                bridge.drawRect(ix + 7, iy + 5, 10, 14, K.C.oxygen[1], K.C.oxygen[2], K.C.oxygen[3], 255)
-                bridge.drawRect(ix + 9, iy + 3, 6, 4, 60, 160, 180, 255)
-            elseif it.type == "keycard" then
-                local glow = sin(game.pulseTimer * 4) * 20 + 220
-                bridge.drawRect(ix + 4, iy + 5, 16, 14, floor(glow), floor(glow * 0.8), 50, 255)
-                bridge.drawRect(ix + 6, iy + 7, 12, 10, K.C.keycard[1], K.C.keycard[2], K.C.keycard[3], 255)
-                bridge.drawRect(ix + 8, iy + 11, 3, 3, 80, 60, 20, 255)
+            local spriteKey = it.spriteKey or it.type
+            local drewSprite = assets.tryDrawSprite(spriteKey, ix, iy, K.TS, K.TS)
+
+            if not drewSprite then
+                -- Fallback procedural item rendering
+                if it.type == "supply" then
+                    bridge.drawRect(ix + 7, iy + 7, 10, 10, K.C.supply[1], K.C.supply[2], K.C.supply[3], 255)
+                    bridge.drawRect(ix + 9, iy + 9, 5, 5, 140, 255, 180, 255)
+                elseif it.type == "medkit" then
+                    bridge.drawRect(ix + 6, iy + 6, 12, 12, 255, 80, 80, 255)
+                    bridge.drawRect(ix + 10, iy + 7, 4, 10, 255, 255, 255, 255)
+                    bridge.drawRect(ix + 7, iy + 10, 10, 4, 255, 255, 255, 255)
+                elseif it.type == "cell" then
+                    local cg = sin(game.pulseTimer * 4) * 40 + 180
+                    bridge.drawRect(ix + 5, iy + 4, 14, 16, floor(cg), 50, floor(cg * 1.1), 255)
+                    bridge.drawRect(ix + 8, iy + 7, 8, 10, 220, 80, 240, 255)
+                elseif it.type == "oxygen" then
+                    bridge.drawRect(ix + 7, iy + 5, 10, 14, K.C.oxygen[1], K.C.oxygen[2], K.C.oxygen[3], 255)
+                    bridge.drawRect(ix + 9, iy + 3, 6, 4, 60, 160, 180, 255)
+                elseif it.type == "keycard" then
+                    local glow = sin(game.pulseTimer * 4) * 20 + 220
+                    bridge.drawRect(ix + 4, iy + 5, 16, 14, floor(glow), floor(glow * 0.8), 50, 255)
+                    bridge.drawRect(ix + 6, iy + 7, 12, 10, K.C.keycard[1], K.C.keycard[2], K.C.keycard[3], 255)
+                    bridge.drawRect(ix + 8, iy + 11, 3, 3, 80, 60, 20, 255)
+                elseif it.type == "scattered_document" then
+                    -- Paper sheet
+                    bridge.drawRect(ix + 8, iy + 8, 14, 18, K.C.document[1], K.C.document[2], K.C.document[3], 255)
+                    bridge.drawRect(ix + 10, iy + 10, 10, 2, 50, 50, 50, 200)
+                    bridge.drawRect(ix + 10, iy + 14, 10, 2, 50, 50, 50, 200)
+                elseif it.type == "terminal" then
+                    -- Computer Monitor
+                    bridge.drawRect(ix + 6, iy + 6, 20, 18, 50, 50, 50, 255) -- Case
+                    local scrG = sin(game.pulseTimer * 5) * 30 + 100
+                    bridge.drawRect(ix + 8, iy + 8, 16, 12, 10, floor(scrG), 30, 255) -- Screen
+                    bridge.drawRect(ix + 8, iy + 22, 20, 4, 40, 40, 40, 255) -- Keyboard
+                end
             end
         end
     end
@@ -296,9 +319,6 @@ function M.drawGame()
         if e.alive and util.isVisible(e.x, e.y) then
             local ex = camOX + e.x * K.TS + sx
             local ey = camOY + e.y * K.TS + sy
-            
-            -- Try to draw enemy sprite (if spriteKey exists and sprite loads)
-            -- UPDATED: Passing K.TS, K.TS to force sprite scaling
             local drewSprite = false
             if e.spriteKey then
                 if e.frameCount and e.frameCount > 1 then
@@ -310,7 +330,6 @@ function M.drawGame()
             end
             
             if not drewSprite then
-                -- Fallback: procedural enemy rendering
                 local aura = sin(game.pulseTimer * 5 + e.x) * 15
                 bridge.drawRect(ex + 2, ey + 2, K.TS - 4, K.TS - 4,
                     min(255, e.color[1] + floor(aura)), min(255, e.color[2]), min(255, e.color[3]), 255)
@@ -318,7 +337,6 @@ function M.drawGame()
                     min(255, e.color[1]+30), min(255, e.color[2]+20), min(255, e.color[3]+20), 255)
             end
             
-            -- HP bar (always show if damaged)
             if e.hp < e.maxHp then
                 local bW = K.TS - 4
                 local hpFrac = e.hp / e.maxHp
@@ -332,13 +350,11 @@ function M.drawGame()
     if game.state ~= "dead" then
         local px_draw = camOX + player.x * K.TS + sx
         local py_draw = camOY + player.y * K.TS + sy
-        
-        -- Try to draw sprite at natural size (16x16), auto-centered in tile
-        -- UPDATED: Passing K.TS, K.TS to force sprite scaling
-        local drewSprite = assets.tryDrawSprite("player", px_draw, py_draw, K.TS, K.TS)
+        local drewSprite = assets.tryDrawSprite("player", px_draw, py_draw, K.TS, K.TS, 
+                                              player.currentFrame, player.frameCols, player.frameRows, 
+                                              player.frameWidth, player.frameHeight)
         
         if not drewSprite then
-            -- Fallback: procedural player rendering
             bridge.drawRect(px_draw + 2, py_draw + 2, K.TS - 4, K.TS - 4, K.C.player[1], K.C.player[2], K.C.player[3], 255)
             bridge.drawRect(px_draw + 5, py_draw + 5, K.TS - 10, K.TS - 10, 100, 220, 255, 255)
             bridge.drawRect(px_draw + 7, py_draw + 6, 10, 5, 20, 60, 80, 255)
@@ -358,8 +374,23 @@ function M.drawGame()
         end
     end
 
-    -- HUD
     drawHUD(mapAreaH)
+
+    -- Interaction Overlay (Documents/Terminals)
+    if game.state == "interacting" then
+        bridge.drawRect(W/4, H/3, W/2, 200, 15, 15, 20, 240)
+        bridge.drawRect(W/4, H/3, W/2, 2, 100, 200, 255, 255)
+        
+        local typeName = (game.interaction.type == "terminal") and "TERMINAL FOUND" or "SCATTERED DOCUMENT"
+        bridge.drawText(typeName, W/4 + 20, H/3 + 20, 100, 230, 255, 255)
+        
+        bridge.drawText("1. Read", W/4 + 40, H/3 + 60, 255, 255, 255, 255)
+        bridge.drawText("2. Leave", W/4 + 40, H/3 + 90, 200, 200, 200, 255)
+        
+        if game.interaction.type == "terminal" then
+             bridge.drawText("(Only on North Walls)", W/4 + 20, H/3 + 150, 100, 100, 100, 255)
+        end
+    end
 
     -- Level up overlay
     if game.state == "levelup" then
@@ -385,4 +416,4 @@ function M.drawGame()
     end
 end
 
-return M
+return M 

@@ -62,6 +62,39 @@ local function endOfTurn()
     combat.checkSanityDeath()
 end
 
+function M.resolveInteraction(choice)
+    local it = game.interaction
+    if choice == 1 then
+        -- Read
+        local items = state.items
+        -- Find item again to be safe (it should exist at index)
+        if items[it.itemIndex] then
+            if it.isCorrupted then
+                local loss = rand(10, 20)
+                player.sanity = max(0, player.sanity - loss)
+                util.addMessage("CORRUPTED! Your mind fractures... (-" .. loss .. " Sanity)", 255, 50, 50)
+                util.screenShake(4, 0.2)
+                combat.checkSanityDeath()
+            else
+                local gain = rand(10, 20)
+                player.sanity = min(100, player.sanity + gain)
+                util.addMessage("Data integrity verified. (+ " .. gain .. " Sanity)", 100, 255, 100)
+            end
+            util.addMessage("LOG: " .. it.content, 200, 200, 220)
+            
+            -- Remove item after reading
+            table.remove(items, it.itemIndex)
+        end
+    else
+        -- Leave
+        util.addMessage("You step away from the " .. (it.type == "terminal" and "terminal." or "paper."), 150, 150, 150)
+    end
+    
+    -- Reset state
+    game.interaction = {active = false}
+    game.state = "playing"
+end
+
 function M.tryMove(dx, dy)
     if game.state ~= "playing" then return end
 
@@ -78,10 +111,28 @@ function M.tryMove(dx, dy)
     end
 
     if util.tileAt(nx, ny) == 0 then
+        -- CHECK FOR INTERACTIVE ITEMS BEFORE MOVING
+        local items = state.items
+        for i, it in ipairs(items) do
+            if it.x == nx and it.y == ny then
+                if it.type == "scattered_document" or it.type == "terminal" then
+                    -- Trigger interaction
+                    game.state = "interacting"
+                    game.interaction = {
+                        active = true,
+                        type = it.type,
+                        itemIndex = i,
+                        content = it.content,
+                        isCorrupted = it.isCorrupted
+                    }
+                    return -- Do not move player, do not end turn yet
+                end
+            end
+        end
+
         player.x = nx; player.y = ny
 
-        -- Items
-        local items = state.items
+        -- Instant Pickup Items
         for i = #items, 1, -1 do
             local it = items[i]
             if it.x == nx and it.y == ny then
@@ -96,29 +147,33 @@ function M.tryMove(dx, dy)
                         util.addMessage("*** ADAPT — Level " .. player.level .. " ***", 255, 255, 100)
                         util.spawnParticles(player.x * K.TS + K.TS/2, player.y * K.TS + K.TS/2, 25, 60, 200, 255, 120, 0.8)
                     end
+                    table.remove(items, i)
                 elseif it.type == "medkit" then
                     player.medkits = player.medkits + 1
                     util.addMessage("Found a medkit!", 100, 255, 150)
                     util.spawnParticles(nx * K.TS + K.TS/2, ny * K.TS + K.TS/2, 6, 100, 255, 150, 40, 0.3)
+                    table.remove(items, i)
                 elseif it.type == "cell" then
                     player.cells = player.cells + 1
                     util.addMessage("POWER CELL acquired! (" .. player.cells .. "/" .. player.cellsNeeded .. ")", K.C.cell[1], K.C.cell[2], K.C.cell[3])
                     util.spawnParticles(nx * K.TS + K.TS/2, ny * K.TS + K.TS/2, 12, 180, 60, 200, 60, 0.5)
                     util.screenShake(2, 0.1)
+                    table.remove(items, i)
                 elseif it.type == "oxygen" then
                     local o2 = rand(10, 20)
                     player.oxygen = min(100, player.oxygen + o2)
                     util.addMessage("O2 canister: +" .. o2 .. " oxygen", K.C.oxygen[1], K.C.oxygen[2], K.C.oxygen[3])
                     util.spawnParticles(nx * K.TS + K.TS/2, ny * K.TS + K.TS/2, 6, 80, 200, 220, 40, 0.3)
+                    table.remove(items, i)
                 elseif it.type == "keycard" then
                     player.keycards = player.keycards + 1
                     util.addMessage("KEYCARD found! Can skip a sector via elevator.", K.C.keycard[1], K.C.keycard[2], K.C.keycard[3])
                     util.spawnParticles(nx * K.TS + K.TS/2, ny * K.TS + K.TS/2, 10, K.C.keycard[1], K.C.keycard[2], K.C.keycard[3], 50, 0.4)
                     util.screenShake(2, 0.15)
-                    -- Reveal elevator on this floor
                     state.elevator.revealed = true
+                    table.remove(items, i)
                 end
-                table.remove(items, i)
+                -- Note: terminal/documents are not removed here, handled in resolveInteraction
             end
         end
 
@@ -202,6 +257,7 @@ function M.resetGame()
     game.particles = {}
     game.marsWhisperTimer = 0
     game.won = false
+    game.interaction = {active=false}
 
     player.hp = 30; player.maxHp = 30
     player.str = 55; player.def = 40

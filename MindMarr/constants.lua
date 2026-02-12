@@ -30,6 +30,10 @@ local C = {
     oxygen    = {80, 200, 220},
     keycard   = {255, 200, 50},
     elevator  = {100, 220, 255},
+    -- New Item Colors
+    document  = {240, 240, 220},
+    terminal  = {50, 200, 100},
+    corrupted = {200, 50, 50},
 }
 
 local MINDMARR_SAYS = {
@@ -63,17 +67,47 @@ local levelChoices = {
     {name = "+3 Crit Range"},
 }
 
+-- Lore Database
+local lore = {
+    clean = {
+        "LAB_LOG_01: Subject reports vibrations. Not seismic. A heartbeat.",
+        "RECOVERY_PLAN: Shuttle fueled. Don't listen to the wind.",
+        "MEMO: The filters are failing. The dust... it tastes like iron.",
+        "DIARY: Day 40. They stopped talking. They just stare at the walls.",
+        "TECH_NOTE: The terminals are rewriting themselves. Code I didn't write.",
+    },
+    corrupted = {
+        "SECURITY_FEED: Everyone is red. MINDMARR MINDMARR.",
+        "CAPTAIN'S LOG: 404... miiinnnddddmmaaarrrr...",
+        "ERROR: JOIN US. FLESH IS WEAK. MARS IS ETERNAL.",
+        "01001... MIND... MARR... SUFFOCATE... BREATHE...",
+        "DONT LOOK BEHIND YOU DONT LOOK BEHIND YOU",
+    }
+}
+
 -- Optional sprite assets (if nil/missing, falls back to procedural rendering)
 local assets = {
     sprites = {
-        player = "assets/Content/textures/scientist.png",
+        -- Characters
+        player = "assets/Content/textures/player_idle.png",
         enemy_scientist = "assets/Content/textures/scientist_mindmarr.png",
         enemy_mindcrab = "assets/Content/textures/mind_crab.png",
         Technician = "assets/Content/textures/scientist_001.png",
-        -- Future: add more sprites here
-        -- medkit = "assets/Content/textures/medkit.png",
+        
+        -- Items & Objects
+        medkit = "assets/Content/textures/medkit.png",
+        supply = "assets/Content/textures/supply.png",
+        cell = "assets/Content/textures/power_cell.png",
+        oxygen = "assets/Content/textures/oxygen_tank.png",
+        keycard = "assets/Content/textures/elevator_keycard.png",
+        shuttle = "assets/Content/textures/shuttle.png",
+        elevator = "assets/Content/textures/elevator.png",
+        
+        -- New Items
+        scattered_document = "assets/Content/textures/handwritten_document.png",
+        terminal = "assets/Content/textures/terminal_001.png",
     },
-        audio = {
+    audio = {
         death = "assets/Content/audio/demo.mp3",
         sector_theme = "assets/Content/audio/TG_8.mp3"
     }
@@ -88,4 +122,5 @@ return {
     marsWhispers = marsWhispers,
     levelChoices = levelChoices,
     assets = assets,
+    lore = lore
 }

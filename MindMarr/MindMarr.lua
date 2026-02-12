@@ -58,6 +58,19 @@ function UpdateUI(mx, my, down, w, h)
         msg.age = msg.age + dt
     end
 
+    -- Animate Player
+    if player.frameCount > 1 then
+        player.animTimer = player.animTimer + dt
+        local frameTime = 1.0 / player.animFPS
+        if player.animTimer >= frameTime then
+            player.animTimer = player.animTimer - frameTime
+            player.currentFrame = player.currentFrame + 1
+            if player.currentFrame > player.frameCount then
+                player.currentFrame = 1
+            end
+        end
+    end
+
     -- Animate enemies every render frame
     for _, e in ipairs(state.enemies) do
         if e.alive and e.frameCount and e.frameCount > 1 then
@@ -102,6 +115,16 @@ function UpdateUI(mx, my, down, w, h)
         return
     end
 
+    -- Interaction Menu (Document/Terminal)
+    if game.state == "interacting" then
+        if keyPressed("1") then
+            actions.resolveInteraction(1)
+        elseif keyPressed("2") then
+            actions.resolveInteraction(2)
+        end
+        return
+    end
+
     -- Playing
     game.inputCooldown = max(0, game.inputCooldown - dt)
 
@@ -117,4 +140,4 @@ end
 
 function DrawUI()
     draw.drawGame()
-end
+end 

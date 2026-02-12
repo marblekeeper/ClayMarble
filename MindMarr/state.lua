@@ -17,6 +17,15 @@ local game = {
     marsWhisperTimer = 0,
     pulseTimer = 0,
     won = false,
+    
+    -- New: Tracks the item the player is currently deciding on
+    interaction = {
+        active = false,
+        type = nil,       -- "scattered_document" or "terminal"
+        itemIndex = nil,  -- Index in items table
+        content = "",     -- Text to display if read
+        isCorrupted = false
+    }
 }
 
 local player = {
@@ -38,6 +47,17 @@ local player = {
     critBonus = 5,
     seen = {},
     keycards = 0,
+
+    -- Animation State
+    -- Assuming 64x64 sprite sheet with 4 frames (2x2 grid, 32x32 frames)
+    frameCount = 4,
+    frameCols = 2,
+    frameRows = 2,
+    frameWidth = 32,
+    frameHeight = 32,
+    currentFrame = 1,
+    animTimer = 0,
+    animFPS = 5
 }
 
 local map = {}
@@ -54,4 +74,4 @@ return {
     items = items,
     shuttle = shuttle,
     elevator = elevator,
-}
+} 
