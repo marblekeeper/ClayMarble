@@ -1,106 +1,169 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
 
-:: =========================================================================
-:: MARBLE ENGINE: NETWORK TEST RUNNER
-:: Usage: network.bat [win|web|clean]
-:: =========================================================================
+REM =========================================================================
+REM network.bat -- MarbleEngine Network Protocol Build & Test
+REM
+REM Uses same toolchain config as build.bat
+REM
+REM Usage:
+REM   network.bat win        Build + run unit tests
+REM   network.bat win demo   Build + run interactive WASD demo
+REM   network.bat web        Build for WASM + run via Node
+REM   network.bat lua        Run Lua self-tests
+REM   network.bat all        Run all tests
+REM =========================================================================
 
-set SRC=test_net.c
-set OUT_WIN=test_net.exe
-set OUT_WEB=test_net.js
+REM === Configuration (matches build.bat) ===
+set "MSYS_DIR=C:\msys64\ucrt64"
+set "EMSDK_DIR=C:\emsdk"
+set "PATH=%MSYS_DIR%\bin;C:\msys64\usr\bin;%PATH%"
 
-:: Check input arguments
-if /i "%1"=="win" goto build_win
-if /i "%1"=="web" goto build_web
-if /i "%1"=="clean" goto clean
-goto help
+if "%1"=="" goto :usage
+if /i "%1"=="win" goto :do_win
+if /i "%1"=="web" goto :do_web
+if /i "%1"=="lua" goto :do_lua
+if /i "%1"=="all" goto :do_all
+goto :usage
 
-:: =========================================================================
-:: WINDOWS TARGET (GCC)
-:: =========================================================================
-:build_win
-echo [WIN] Checking for GCC...
-where gcc >nul 2>nul
-if %errorlevel% neq 0 (
-    echo Error: GCC not found in PATH. Please install MinGW or similar.
-    exit /b 1
-)
-
-echo [WIN] Compiling %SRC%...
-gcc -std=c99 -Wall -Wextra -O2 %SRC% -o %OUT_WIN%
-if %errorlevel% neq 0 (
-    echo [WIN] Compilation FAILED.
-    exit /b 1
-)
-
-echo [WIN] Compilation SUCCESS. Running Unit Tests...
-echo ---------------------------------------------------
-%OUT_WIN%
-echo ---------------------------------------------------
+REM =========================================================================
+:do_win
+echo ============================================
+echo  MarbleEngine Network Protocol - Windows
+echo ============================================
 echo.
-echo To run the interactive demo, type: %OUT_WIN% --demo
-goto end
-
-:: =========================================================================
-:: WEB TARGET (EMSCRIPTEN)
-:: =========================================================================
-:build_web
-echo [WEB] Checking for Emscripten (emcc)...
-call emcc --version >nul 2>nul
-if %errorlevel% neq 0 (
-    echo Error: emcc not found in PATH. Please activate Emscripten environment.
-    exit /b 1
-)
-
-echo [WEB] Compiling %SRC% to WASM/JS...
-:: We compile to .js so it can be run via Node for testing or embedded in HTML
-call emcc -std=c99 -Wall -Wextra -O2 %SRC% -o %OUT_WEB%
-if %errorlevel% neq 0 (
-    echo [WEB] Compilation FAILED.
-    exit /b 1
-)
-
-echo [WEB] Compilation SUCCESS (%OUT_WEB% generated).
+taskkill /F /IM test_net.exe >nul 2>nul
+echo [BUILD] gcc -std=c99 -w -O2 test_net.c -o test_net.exe
+gcc -std=c99 -w -O2 test_net.c -o test_net.exe -Iinclude -I"%MSYS_DIR%\include" -static -lm
+if %ERRORLEVEL% neq 0 goto :win_fail
+echo [BUILD] OK
 echo.
-echo Checking for Node.js to run tests...
+if /i "%2"=="demo" goto :win_demo
+test_net.exe
+exit /b %ERRORLEVEL%
+:win_demo
+test_net.exe --demo
+exit /b %ERRORLEVEL%
+:win_fail
+echo.
+echo [ERROR] Compilation failed.
+exit /b 1
+
+REM =========================================================================
+:do_web
+echo ============================================
+echo  MarbleEngine Network Protocol - Web/WASM
+echo ============================================
+echo.
+
+set "EMCC_PATH="
+if exist "%EMSDK_DIR%\upstream\emscripten\emcc.bat" (
+    set "EMCC_PATH=%EMSDK_DIR%\upstream\emscripten"
+)
+if "!EMCC_PATH!"=="" (
+    echo [ERROR] Emscripten not found at %EMSDK_DIR%
+    exit /b 1
+)
+set "PATH=!EMCC_PATH!;%EMSDK_DIR%;%PATH%"
+
+echo [BUILD] emcc -std=c99 -O2 test_net.c -o test_net.js
+call emcc -std=c99 -O2 test_net.c -o test_net.js -sENVIRONMENT=node
+if %ERRORLEVEL% neq 0 goto :web_fail
+echo [BUILD] OK
+echo.
 where node >nul 2>nul
-if %errorlevel% equ 0 (
-    echo [WEB] Running via Node.js...
-    echo ---------------------------------------------------
-    node %OUT_WEB%
-    echo ---------------------------------------------------
-) else (
-    echo [WEB] Node.js not found. Open %OUT_WEB% in a browser or install Node to run tests headless.
+if %ERRORLEVEL% neq 0 (
+    echo [WARN] Node.js not found. Built WASM but can't run.
+    exit /b 0
 )
-goto end
-
-:: =========================================================================
-:: CLEAN
-:: =========================================================================
-:clean
-echo Cleaning build artifacts...
-if exist %OUT_WIN% del %OUT_WIN%
-if exist %OUT_WEB% del %OUT_WEB%
-if exist test_net.wasm del test_net.wasm
-echo Done.
-goto end
-
-:: =========================================================================
-:: HELP
-:: =========================================================================
-:help
+node test_net.js
+exit /b %ERRORLEVEL%
+:web_fail
 echo.
-echo Usage: network.bat [target]
-echo.
-echo Targets:
-echo   win    - Compile with GCC and run unit tests (Windows)
-echo   web    - Compile with Emscripten and run via Node (Web/WASM)
-echo   clean  - Remove build artifacts
-echo.
-echo Prerequisite:
-echo   Ensure 'test_net.c' and 'marble_net.h' are in this directory.
-goto end
+echo [ERROR] emcc compilation failed.
+exit /b 1
 
-:end
-endlocal
+REM =========================================================================
+:do_lua
+echo ============================================
+echo  MarbleEngine Network Protocol - Lua Tests
+echo ============================================
+echo.
+
+REM Try each Lua interpreter
+for %%L in (lua lua54 lua5.4 lua5.3 luajit) do (
+    where %%L >nul 2>nul
+    if !ERRORLEVEL! equ 0 (
+        echo [RUN] Using %%L
+        echo.
+        %%L -e "local net = dofile('network.lua'); os.exit(net.selfTest() and 0 or 1)"
+        exit /b !ERRORLEVEL!
+    )
+)
+echo [ERROR] No Lua interpreter found.
+exit /b 1
+
+REM =========================================================================
+:do_all
+echo ============================================
+echo  MarbleEngine Network Protocol - All Tests
+echo ============================================
+echo.
+
+REM --- C Tests ---
+echo [1/2] C Unit Tests
+echo -------------------
+taskkill /F /IM test_net.exe >nul 2>nul
+echo gcc -std=c99 -w -O2 test_net.c -o test_net.exe
+gcc -std=c99 -w -O2 test_net.c -o test_net.exe -Iinclude -I"%MSYS_DIR%\include" -static -lm
+if %ERRORLEVEL% neq 0 (
+    echo [ERROR] GCC compilation failed.
+    set C_OK=no
+    goto :all_lua
+)
+test_net.exe
+if %ERRORLEVEL% neq 0 (
+    set C_OK=no
+    goto :all_lua
+)
+set C_OK=yes
+
+:all_lua
+echo.
+echo [2/2] Lua Self-Tests
+echo ---------------------
+set LUA_OK=skip
+for %%L in (lua lua54 lua5.4 lua5.3 luajit) do (
+    if "!LUA_OK!"=="skip" (
+        where %%L >nul 2>nul
+        if !ERRORLEVEL! equ 0 (
+            %%L -e "local net = dofile('network.lua'); os.exit(net.selfTest() and 0 or 1)"
+            if !ERRORLEVEL! equ 0 (set LUA_OK=yes) else (set LUA_OK=no)
+        )
+    )
+)
+if "!LUA_OK!"=="skip" echo [SKIP] No Lua interpreter found.
+
+echo.
+echo ============================================
+echo  SUMMARY
+echo ============================================
+if "!C_OK!"=="yes" (echo   C:   PASSED) else (echo   C:   FAILED)
+if "!LUA_OK!"=="yes" (echo   Lua: PASSED) else if "!LUA_OK!"=="skip" (echo   Lua: SKIPPED) else (echo   Lua: FAILED)
+echo ============================================
+
+if "!C_OK!"=="yes" if "!LUA_OK!"=="yes" exit /b 0
+if "!C_OK!"=="yes" if "!LUA_OK!"=="skip" exit /b 0
+exit /b 1
+
+REM =========================================================================
+:usage
+echo.
+echo Usage: network.bat [win/web/lua/all] [demo]
+echo.
+echo   win        Build + run C unit tests (GCC)
+echo   win demo   Build + run interactive WASD demo
+echo   web        Build + run C unit tests (Emscripten/WASM)
+echo   lua        Run Lua self-tests
+echo   all        Run all tests (C + Lua)
+exit /b 1

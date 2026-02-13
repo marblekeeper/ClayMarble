@@ -526,41 +526,42 @@ static inline void net_build_snapshot(const NetWorld* w, Snapshot* s) {
 
 #ifdef MARBLE_NET_IMPLEMENTATION
 
-static const char* OPCODE_NAMES[256] = {
-    [OP_MOVE_NORTH]     = "MOVE_NORTH",
-    [OP_MOVE_SOUTH]     = "MOVE_SOUTH",
-    [OP_MOVE_EAST]      = "MOVE_EAST",
-    [OP_MOVE_WEST]      = "MOVE_WEST",
-    [OP_MOVE_NE]        = "MOVE_NE",
-    [OP_MOVE_NW]        = "MOVE_NW",
-    [OP_MOVE_SE]        = "MOVE_SE",
-    [OP_MOVE_SW]        = "MOVE_SW",
-    [OP_ASCEND]         = "ASCEND",
-    [OP_DESCEND]        = "DESCEND",
-    [OP_TELEPORT]       = "TELEPORT",
-    [OP_MELEE_ATTACK]   = "MELEE_ATTACK",
-    [OP_RANGED_ATTACK]  = "RANGED_ATTACK",
-    [OP_DEFEND]         = "DEFEND",
-    [OP_USE_SKILL]      = "USE_SKILL",
-    [OP_USE_MEDKIT]     = "USE_MEDKIT",
-    [OP_PICK_UP]        = "PICK_UP",
-    [OP_DROP]           = "DROP",
-    [OP_EQUIP]          = "EQUIP",
-    [OP_CONSUME]        = "CONSUME",
-    [OP_USE_ITEM]       = "USE_ITEM",
-    [OP_INTERACT_DOOR]  = "INTERACT_DOOR",
-    [OP_SEARCH]         = "SEARCH",
-    [OP_DISARM_TRAP]    = "DISARM_TRAP",
-    [OP_ACTIVATE]       = "ACTIVATE",
-    [OP_HEARTBEAT]      = "HEARTBEAT",
-    [OP_LOGIN]          = "LOGIN",
-    [OP_LOGOUT]         = "LOGOUT",
-    [OP_ARENA_CHALLENGE]= "ARENA_CHALLENGE",
-    [OP_ARENA_ACCEPT]   = "ARENA_ACCEPT",
-    [OP_ARENA_DECLINE]  = "ARENA_DECLINE",
-    [OP_SYNC_REQUEST]   = "SYNC_REQUEST",
-    [OP_NOP]            = "NOP",
-};
+static void net_init_opcode_names(void) {
+    /* Explicitly zero first (static arrays are zero-init, but be safe) */
+    OPCODE_NAMES[OP_MOVE_NORTH]     = "MOVE_NORTH";
+    OPCODE_NAMES[OP_MOVE_SOUTH]     = "MOVE_SOUTH";
+    OPCODE_NAMES[OP_MOVE_EAST]      = "MOVE_EAST";
+    OPCODE_NAMES[OP_MOVE_WEST]      = "MOVE_WEST";
+    OPCODE_NAMES[OP_MOVE_NE]        = "MOVE_NE";
+    OPCODE_NAMES[OP_MOVE_NW]        = "MOVE_NW";
+    OPCODE_NAMES[OP_MOVE_SE]        = "MOVE_SE";
+    OPCODE_NAMES[OP_MOVE_SW]        = "MOVE_SW";
+    OPCODE_NAMES[OP_ASCEND]         = "ASCEND";
+    OPCODE_NAMES[OP_DESCEND]        = "DESCEND";
+    OPCODE_NAMES[OP_TELEPORT]       = "TELEPORT";
+    OPCODE_NAMES[OP_MELEE_ATTACK]   = "MELEE_ATTACK";
+    OPCODE_NAMES[OP_RANGED_ATTACK]  = "RANGED_ATTACK";
+    OPCODE_NAMES[OP_DEFEND]         = "DEFEND";
+    OPCODE_NAMES[OP_USE_SKILL]      = "USE_SKILL";
+    OPCODE_NAMES[OP_USE_MEDKIT]     = "USE_MEDKIT";
+    OPCODE_NAMES[OP_PICK_UP]        = "PICK_UP";
+    OPCODE_NAMES[OP_DROP]           = "DROP";
+    OPCODE_NAMES[OP_EQUIP]          = "EQUIP";
+    OPCODE_NAMES[OP_CONSUME]        = "CONSUME";
+    OPCODE_NAMES[OP_USE_ITEM]       = "USE_ITEM";
+    OPCODE_NAMES[OP_INTERACT_DOOR]  = "INTERACT_DOOR";
+    OPCODE_NAMES[OP_SEARCH]         = "SEARCH";
+    OPCODE_NAMES[OP_DISARM_TRAP]    = "DISARM_TRAP";
+    OPCODE_NAMES[OP_ACTIVATE]       = "ACTIVATE";
+    OPCODE_NAMES[OP_HEARTBEAT]      = "HEARTBEAT";
+    OPCODE_NAMES[OP_LOGIN]          = "LOGIN";
+    OPCODE_NAMES[OP_LOGOUT]         = "LOGOUT";
+    OPCODE_NAMES[OP_ARENA_CHALLENGE]= "ARENA_CHALLENGE";
+    OPCODE_NAMES[OP_ARENA_ACCEPT]   = "ARENA_ACCEPT";
+    OPCODE_NAMES[OP_ARENA_DECLINE]  = "ARENA_DECLINE";
+    OPCODE_NAMES[OP_SYNC_REQUEST]   = "SYNC_REQUEST";
+    OPCODE_NAMES[OP_NOP]            = "NOP";
+}
 
 static const char* VALIDATE_RESULT_NAMES[VALIDATE_RESULT_COUNT] = {
     "OK",

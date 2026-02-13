@@ -385,6 +385,7 @@ static void test_queue_wraparound(void) {
         InteractionCommand cmd, out;
         uint32_t i;
         net_queue_init(&q);
+        memset(&out, 0, sizeof(out));
 
         /* Fill half, drain half, fill again -- exercises wraparound */
         cmd = net_cmd_move(0, OP_MOVE_NORTH);
@@ -828,6 +829,7 @@ static void demo_sleep_ms(int ms) { Sleep(ms); }
 static int  demo_kbhit(void) { return _kbhit(); }
 static int  demo_getch(void) { return _getch(); }
 #else
+#define _DEFAULT_SOURCE
 #include <unistd.h>
 #include <termios.h>
 #include <sys/select.h>
@@ -868,10 +870,9 @@ static void print_map(const NetWorld* w, const Snapshot* snap) {
 
     /* Overlay entities from snapshot */
     for (i = 0; i < snap->entity_count; i++) {
-        const SnapshotEntity* e = &snap->entities[i];
-        if (e->flags & 0x01) { /* alive */
-            if (e->x < NET_MAP_W && e->y < NET_MAP_H) {
-                display[e->y][e->x] = (char)e->glyph;
+        if (snap->entities[i].flags & 0x01) { /* alive */
+            if (snap->entities[i].x < NET_MAP_W && snap->entities[i].y < NET_MAP_H) {
+                display[snap->entities[i].y][snap->entities[i].x] = (char)snap->entities[i].glyph;
             }
         }
     }
@@ -884,17 +885,20 @@ static void print_map(const NetWorld* w, const Snapshot* snap) {
            snap->entities[0].hp, snap->entities[0].max_hp);
 
     {
-        int px = (int)snap->entities[0].x;
-        int py = (int)snap->entities[0].y;
-        int vx1 = px - 7; if (vx1 < 0) vx1 = 0;
-        int vy1 = py - 5; if (vy1 < 0) vy1 = 0;
-        int vx2 = vx1 + 15; if (vx2 > NET_MAP_W) { vx2 = NET_MAP_W; vx1 = vx2 - 15; if (vx1 < 0) vx1 = 0; }
-        int vy2 = vy1 + 11; if (vy2 > NET_MAP_H) { vy2 = NET_MAP_H; vy1 = vy2 - 11; if (vy1 < 0) vy1 = 0; }
+        int px, py, vx1, vy1, vx2, vy2;
+        char c;
+
+        px = (int)snap->entities[0].x;
+        py = (int)snap->entities[0].y;
+        vx1 = px - 7; if (vx1 < 0) vx1 = 0;
+        vy1 = py - 5; if (vy1 < 0) vy1 = 0;
+        vx2 = vx1 + 15; if (vx2 > NET_MAP_W) { vx2 = NET_MAP_W; vx1 = vx2 - 15; if (vx1 < 0) vx1 = 0; }
+        vy2 = vy1 + 11; if (vy2 > NET_MAP_H) { vy2 = NET_MAP_H; vy1 = vy2 - 11; if (vy1 < 0) vy1 = 0; }
 
         for (y = vy1; y < vy2; y++) {
             printf("  ");
             for (x = vx1; x < vx2; x++) {
-                char c = display[y][x];
+                c = display[y][x];
                 if (c == '@') printf("\033[1;36m@\033[0m");
                 else if (c == 'S') printf("\033[1;31mS\033[0m");
                 else if (c == '#') printf("\033[0;33m#\033[0m");
@@ -944,11 +948,17 @@ static void run_demo(void) {
     printf("Tick rate: %dms (%.1fs)\n\n", NET_TICK_INTERVAL_MS, NET_TICK_INTERVAL_MS / 1000.0f);
 
     while (running) {
+        int ch;
+        InteractionCommand cmd;
+        int pushed;
+        uint8_t wire[NET_CMD_SIZE];
+        InteractionCommand verified;
+
         /* Collect input */
         while (demo_kbhit()) {
-            int ch = demo_getch();
-            InteractionCommand cmd;
-            int pushed = 0;
+            ch = demo_getch();
+            pushed = 0;
+            memset(&cmd, 0, sizeof(cmd));
 
             switch (ch) {
                 case 'w': case 'W':
@@ -969,9 +979,6 @@ static void run_demo(void) {
             }
 
             if (pushed) {
-                uint8_t wire[NET_CMD_SIZE];
-                InteractionCommand verified;
-
                 /* Serialize -> deserialize (proves wire format works) */
                 net_pack_command(&cmd, wire);
                 net_unpack_command(wire, &verified);
@@ -1002,6 +1009,9 @@ static void run_demo(void) {
  * ========================================================================= */
 
 int main(int argc, char* argv[]) {
+    /* Init string tables */
+    net_init_opcode_names();
+
     /* Check for --demo flag */
     if (argc > 1 && strcmp(argv[1], "--demo") == 0) {
         run_demo();
@@ -1085,6 +1095,8 @@ int main(int argc, char* argv[]) {
     }
 
     printf("\nRun with --demo for interactive WASD demo (0.6s tick)\n");
+    printf("Validation names available: %s ... %s\n",
+           VALIDATE_RESULT_NAMES[0], VALIDATE_RESULT_NAMES[VALIDATE_RESULT_COUNT-1]);
 
     return (g_tests_failed > 0) ? 1 : 0;
 }
