@@ -207,12 +207,12 @@ call emcc tests\test_ui.c src\bridge_engine.c src\input_handler.c -o web\index.h
     -s ALLOW_MEMORY_GROWTH=1 ^
     -s INITIAL_MEMORY=67108864 ^
     -s EXPORTED_RUNTIME_METHODS="['ccall','cwrap']" ^
-    -s EXPORTED_FUNCTIONS="['_main']" ^
+    -s EXPORTED_FUNCTIONS="['_main','_malloc','_free']" ^
     --preload-file scripts@/scripts ^
     --preload-file "MindMarr@/MindMarr" ^
     --preload-file assets@/assets ^
     -O2 ^
-    -std=c99 ^
+    -std=gnu99 ^
     --shell-file shell_minimal.html
 
 if %ERRORLEVEL% NEQ 0 (

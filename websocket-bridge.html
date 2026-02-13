@@ -1,0 +1,65 @@
+<!-- Add this to your index.html in the <head> or before </body> -->
+<script>
+// WebSocket bridge for Lua
+window.gameWebSocket = null;
+window.wsConnected = false;
+window.wsMessages = [];
+
+// Connect to WebSocket server
+window.wsConnect = function(url) {
+    console.log("Connecting to:", url);
+    
+    try {
+        window.gameWebSocket = new WebSocket(url);
+        
+        window.gameWebSocket.onopen = function() {
+            console.log("WebSocket connected!");
+            window.wsConnected = true;
+        };
+        
+        window.gameWebSocket.onmessage = function(event) {
+            // Store messages for Lua to poll
+            window.wsMessages.push(event.data);
+        };
+        
+        window.gameWebSocket.onerror = function(error) {
+            console.error("WebSocket error:", error);
+            window.wsConnected = false;
+        };
+        
+        window.gameWebSocket.onclose = function() {
+            console.log("WebSocket closed");
+            window.wsConnected = false;
+        };
+        
+        return true;
+    } catch(e) {
+        console.error("Failed to create WebSocket:", e);
+        return false;
+    }
+};
+
+// Send message to server
+window.wsSend = function(message) {
+    if (window.gameWebSocket && window.gameWebSocket.readyState === WebSocket.OPEN) {
+        window.gameWebSocket.send(message);
+        return true;
+    }
+    return false;
+};
+
+// Check if connected
+window.wsIsConnected = function() {
+    return window.wsConnected;
+};
+
+// Get next message (for Lua to poll)
+window.wsGetMessage = function() {
+    if (window.wsMessages.length > 0) {
+        return window.wsMessages.shift();
+    }
+    return null;
+};
+
+console.log("WebSocket bridge loaded");
+</script>

@@ -1,4 +1,4 @@
-/* test_ui.c - EMSCRIPTEN COMPATIBLE VERSION WITH ROBUST AUDIO */
+/* test_ui.c - EMSCRIPTEN COMPATIBLE VERSION WITH ROBUST AUDIO AND JS INTEROP */
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <emscripten/html5.h>
@@ -117,6 +117,126 @@ const unsigned char FONT_DATA[] = {
     0x44,0x28,0x10,0x28,0x44, 0x0C,0x50,0x50,0x50,0x3C, 0x44,0x64,0x54,0x4C,0x44, 0x00,0x08,0x36,0x41,0x00,
     0x00,0x00,0x7F,0x00,0x00, 0x00,0x41,0x36,0x08,0x00, 0x10,0x08,0x08,0x10,0x08, 0x7F,0x7F,0x7F,0x7F,0x7F
 };
+
+/* --- JavaScript Interop (Emscripten only) --- */
+#ifdef __EMSCRIPTEN__
+// Call JavaScript and get string result
+static char* bridge_callJS_internal(const char* jsCode) {
+    char* result = (char*)EM_ASM_INT({
+        try {
+            var code = UTF8ToString($0);
+            var result = eval(code);
+            
+            // Convert result to string
+            var resultStr = String(result);
+            
+            // Allocate memory and copy string
+            var len = lengthBytesUTF8(resultStr) + 1;
+            var ptr = _malloc(len);
+            stringToUTF8(resultStr, ptr, len);
+            return ptr;
+        } catch(e) {
+            console.error("JavaScript eval error:", e);
+            var errorStr = "";
+            var len = lengthBytesUTF8(errorStr) + 1;
+            var ptr = _malloc(len);
+            stringToUTF8(errorStr, ptr, len);
+            return ptr;
+        }
+    }, jsCode);
+    
+    return result;
+}
+
+// Optimized versions that call the window functions directly (MUCH faster)
+static int bridge_wsIsConnected() {
+    return EM_ASM_INT({
+        return (typeof window.wsIsConnected === 'function') ? window.wsIsConnected() : 0;
+    });
+}
+
+static char* bridge_wsGetMessage() {
+    char* result = (char*)EM_ASM_INT({
+        if (typeof window.wsGetMessage !== 'function') {
+            return 0;
+        }
+        var msg = window.wsGetMessage();
+        if (!msg || msg === "") {
+            return 0;
+        }
+        var len = lengthBytesUTF8(msg) + 1;
+        var ptr = _malloc(len);
+        stringToUTF8(msg, ptr, len);
+        return ptr;
+    });
+    return result;
+}
+
+static int bridge_wsSendMessage(const char* message) {
+    return EM_ASM_INT({
+        if (typeof window.wsSendMessage !== 'function') {
+            return 0;
+        }
+        var msg = UTF8ToString($0);
+        return window.wsSendMessage(msg);
+    }, message);
+}
+
+#else
+// Dummy for native builds
+static char* bridge_callJS_internal(const char* jsCode) {
+    return strdup("");
+}
+static int bridge_wsIsConnected() { return 0; }
+static char* bridge_wsGetMessage() { return NULL; }
+static int bridge_wsSendMessage(const char* msg) { return 0; }
+#endif
+
+/* --- Optimized Lua Bindings --- */
+static int l_bridge_callJS(lua_State* L) {
+    const char* jsCode = luaL_checkstring(L, 1);
+    
+    // Check for common optimized functions
+    if (strcmp(jsCode, "wsIsConnected()") == 0) {
+        lua_pushinteger(L, bridge_wsIsConnected());
+        return 1;
+    } else if (strcmp(jsCode, "wsGetMessage()") == 0) {
+        char* msg = bridge_wsGetMessage();
+        if (msg) {
+            lua_pushstring(L, msg);
+            free(msg);
+        } else {
+            lua_pushstring(L, "");
+        }
+        return 1;
+    } else if (strncmp(jsCode, "wsSendMessage('", 15) == 0) {
+        // Extract message from wsSendMessage('...')
+        const char* msgStart = jsCode + 15;
+        const char* msgEnd = strrchr(msgStart, '\'');
+        if (msgEnd) {
+            size_t len = msgEnd - msgStart;
+            char* msg = (char*)malloc(len + 1);
+            strncpy(msg, msgStart, len);
+            msg[len] = '\0';
+            int result = bridge_wsSendMessage(msg);
+            free(msg);
+            lua_pushinteger(L, result);
+            return 1;
+        }
+    }
+    
+    // Fallback to generic eval
+    char* result = bridge_callJS_internal(jsCode);
+    
+    if (result) {
+        lua_pushstring(L, result);
+        free(result);
+    } else {
+        lua_pushstring(L, "");
+    }
+    
+    return 1;
+}
 
 /* --- Audio Functions --- */
 
@@ -634,10 +754,11 @@ int main(int argc, char** argv) {
     lua_pushcfunction(L, l_draw_texture); lua_setfield(L, -2, "drawTexture");
     lua_pushcfunction(L, l_draw_texture_region); lua_setfield(L, -2, "DrawTextureRegion");
     lua_pushcfunction(L, l_getKeyState); lua_setfield(L, -2, "getKeyState");
-    lua_pushcfunction(L, l_playSound); lua_setfield(L, -2, "playSound"); // New Audio function
+    lua_pushcfunction(L, l_playSound); lua_setfield(L, -2, "playSound");
+    lua_pushcfunction(L, l_bridge_callJS); lua_setfield(L, -2, "callJS"); // NEW: JavaScript interop
     lua_setglobal(L, "bridge");
 
-    const char* scriptName = (argc > 1) ? argv[1] : "MindMarr";
+    const char* scriptName = (argc > 1) ? argv[1] : "space_shooter_v2";
     char scriptPath[256];
     char frameworkPath[256];
 

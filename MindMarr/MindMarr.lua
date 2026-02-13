@@ -124,6 +124,18 @@ function UpdateUI(mx, my, down, w, h)
         end
         return
     end
+    
+    -- Interaction Menu (Scrap)
+    if game.state == "interacting_scrap" then
+        local opts = game.interaction.options or {}
+        for i = 1, #opts do
+            if keyPressed(tostring(i)) then
+                actions.resolveScrapInteraction(i)
+                break
+            end
+        end
+        return
+    end
 
     -- Playing
     game.inputCooldown = max(0, game.inputCooldown - dt)

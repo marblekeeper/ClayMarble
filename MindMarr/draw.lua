@@ -189,6 +189,10 @@ local function drawHUD(mapAreaH)
     bridge.drawText("Keys:" .. player.keycards, col1 + 80, ly, K.C.keycard[1], K.C.keycard[2], K.C.keycard[3], 255)
     bridge.drawText("Cells:" .. player.cells .. "/" .. player.cellsNeeded, col1 + 140, ly, K.C.cell[1], K.C.cell[2], K.C.cell[3], 255)
     bridge.drawText("Kills:" .. player.kills, col1 + 260, ly, 200, 140, 140, 255)
+    
+    if player.hasBackpack then
+        bridge.drawText("Scrap:" .. player.scrapCount, col1 + 340, ly, 200, 200, 200, 255)
+    end
 
     -- Message log
     local msgX = W/2 + 20
@@ -299,16 +303,18 @@ function M.drawGame()
                     bridge.drawRect(ix + 6, iy + 7, 12, 10, K.C.keycard[1], K.C.keycard[2], K.C.keycard[3], 255)
                     bridge.drawRect(ix + 8, iy + 11, 3, 3, 80, 60, 20, 255)
                 elseif it.type == "scattered_document" then
-                    -- Paper sheet
                     bridge.drawRect(ix + 8, iy + 8, 14, 18, K.C.document[1], K.C.document[2], K.C.document[3], 255)
                     bridge.drawRect(ix + 10, iy + 10, 10, 2, 50, 50, 50, 200)
                     bridge.drawRect(ix + 10, iy + 14, 10, 2, 50, 50, 50, 200)
                 elseif it.type == "terminal" then
-                    -- Computer Monitor
                     bridge.drawRect(ix + 6, iy + 6, 20, 18, 50, 50, 50, 255) -- Case
                     local scrG = sin(game.pulseTimer * 5) * 30 + 100
                     bridge.drawRect(ix + 8, iy + 8, 16, 12, 10, floor(scrG), 30, 255) -- Screen
                     bridge.drawRect(ix + 8, iy + 22, 20, 4, 40, 40, 40, 255) -- Keyboard
+                elseif it.type == "scrap" then
+                    bridge.drawRect(ix + 6, iy + 10, 8, 8, K.C.scrap[1], K.C.scrap[2], K.C.scrap[3], 255)
+                    bridge.drawRect(ix + 14, iy + 8, 6, 6, 100, 100, 110, 255)
+                    bridge.drawRect(ix + 10, iy + 16, 10, 4, 80, 80, 90, 255)
                 end
             end
         end
@@ -389,6 +395,23 @@ function M.drawGame()
         
         if game.interaction.type == "terminal" then
              bridge.drawText("(Only on North Walls)", W/4 + 20, H/3 + 150, 100, 100, 100, 255)
+        end
+    end
+    
+    -- Interaction Overlay (Scrap)
+    if game.state == "interacting_scrap" then
+        local opts = game.interaction.options or {}
+        local menuH = 40 + #opts * 30
+        
+        bridge.drawRect(W/4, H/3, W/2, menuH, 15, 15, 25, 245)
+        bridge.drawRect(W/4, H/3, W/2, 2, 160, 160, 170, 255)
+        
+        bridge.drawText("SCRAP PILE", W/4 + 20, H/3 + 15, 200, 200, 220, 255)
+        
+        for i, opt in ipairs(opts) do
+            local y = H/3 + 40 + (i-1) * 30
+            local color = (opt.action == "leave") and {180, 180, 180} or {255, 255, 255}
+            bridge.drawText(i .. ". " .. opt.label, W/4 + 40, y, color[1], color[2], color[3], 255)
         end
     end
 

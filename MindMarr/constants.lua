@@ -1,7 +1,7 @@
 -- constants.lua
 -- MINDMARR: Shared constants, palette, config
 
-local TS = 48
+local TS = 80
 local MW, MH = 30, 22
 
 local C = {
@@ -34,6 +34,7 @@ local C = {
     document  = {240, 240, 220},
     terminal  = {50, 200, 100},
     corrupted = {200, 50, 50},
+    scrap     = {160, 160, 170},
 }
 
 local MINDMARR_SAYS = {
@@ -106,6 +107,7 @@ local assets = {
         -- New Items
         scattered_document = "assets/Content/textures/handwritten_document.png",
         terminal = "assets/Content/textures/terminal_001.png",
+        scrap = "assets/Content/textures/scrap.png",
     },
     audio = {
         death = "assets/Content/audio/demo.mp3",
@@ -123,4 +125,4 @@ return {
     levelChoices = levelChoices,
     assets = assets,
     lore = lore
-}
+} 

@@ -21,10 +21,11 @@ local game = {
     -- New: Tracks the item the player is currently deciding on
     interaction = {
         active = false,
-        type = nil,       -- "scattered_document" or "terminal"
+        type = nil,       -- "scattered_document", "terminal", "scrap"
         itemIndex = nil,  -- Index in items table
         content = "",     -- Text to display if read
-        isCorrupted = false
+        isCorrupted = false,
+        options = {}      -- For scrap menu options
     }
 }
 
@@ -47,6 +48,12 @@ local player = {
     critBonus = 5,
     seen = {},
     keycards = 0,
+    
+    -- Inventory / Crafting
+    hasBackpack = false,
+    hasSword = false,
+    hasScrapArmor = false,
+    scrapCount = 0,
 
     -- Animation State
     -- Assuming 64x64 sprite sheet with 4 frames (2x2 grid, 32x32 frames)

@@ -67,7 +67,6 @@ function M.resolveInteraction(choice)
     if choice == 1 then
         -- Read
         local items = state.items
-        -- Find item again to be safe (it should exist at index)
         if items[it.itemIndex] then
             if it.isCorrupted then
                 local loss = rand(10, 20)
@@ -81,8 +80,6 @@ function M.resolveInteraction(choice)
                 util.addMessage("Data integrity verified. (+ " .. gain .. " Sanity)", 100, 255, 100)
             end
             util.addMessage("LOG: " .. it.content, 200, 200, 220)
-            
-            -- Remove item after reading
             table.remove(items, it.itemIndex)
         end
     else
@@ -90,8 +87,71 @@ function M.resolveInteraction(choice)
         util.addMessage("You step away from the " .. (it.type == "terminal" and "terminal." or "paper."), 150, 150, 150)
     end
     
-    -- Reset state
     game.interaction = {active = false}
+    game.state = "playing"
+end
+
+function M.generateScrapOptions()
+    local opts = {}
+    if not player.hasBackpack then
+        table.insert(opts, {label="Craft Backpack (Allows Storing Scrap)", action="backpack"})
+    end
+    if not player.hasSword then
+        table.insert(opts, {label="Makeshift Sword (+2 Min/Max DMG)", action="sword"})
+    end
+    if not player.hasScrapArmor then
+        table.insert(opts, {label="Makeshift Armor (+1 Armor)", action="armor"})
+    end
+    if player.hasBackpack then
+        table.insert(opts, {label="Stash in Backpack", action="stash"})
+    end
+    table.insert(opts, {label="Leave", action="leave"})
+    return opts
+end
+
+function M.resolveScrapInteraction(choiceIndex)
+    local it = game.interaction
+    local opts = it.options
+    
+    if choiceIndex > #opts then return end
+    
+    local opt = opts[choiceIndex]
+    local items = state.items
+    
+    if opt.action == "leave" then
+        util.addMessage("You leave the scrap pile.", 150, 150, 150)
+        game.interaction = {active=false}
+        game.state = "playing"
+        return
+    end
+
+    if items[it.itemIndex] then
+        if opt.action == "backpack" then
+            player.hasBackpack = true
+            util.addMessage("Crafted Backpack! You can now carry scrap.", 100, 255, 150)
+            util.spawnParticles(player.x * K.TS + K.TS/2, player.y * K.TS + K.TS/2, 10, 200, 200, 200, 50, 0.5)
+            table.remove(items, it.itemIndex)
+        elseif opt.action == "sword" then
+            player.hasSword = true
+            player.dmgMin = player.dmgMin + 2
+            player.dmgMax = player.dmgMax + 2
+            util.addMessage("Crafted Makeshift Sword! Damage increased.", 255, 100, 100)
+            util.spawnParticles(player.x * K.TS + K.TS/2, player.y * K.TS + K.TS/2, 10, 200, 50, 50, 50, 0.5)
+            table.remove(items, it.itemIndex)
+        elseif opt.action == "armor" then
+            player.hasScrapArmor = true
+            player.armor = player.armor + 1
+            util.addMessage("Crafted Makeshift Armor! +1 Armor.", 100, 100, 255)
+            util.spawnParticles(player.x * K.TS + K.TS/2, player.y * K.TS + K.TS/2, 10, 50, 50, 200, 50, 0.5)
+            table.remove(items, it.itemIndex)
+        elseif opt.action == "stash" then
+            player.scrapCount = player.scrapCount + 1
+            util.addMessage("Scrap stashed in backpack.", 200, 200, 200)
+            table.remove(items, it.itemIndex)
+        end
+    end
+    
+    game.interaction = {active=false}
     game.state = "playing"
 end
 
@@ -111,12 +171,11 @@ function M.tryMove(dx, dy)
     end
 
     if util.tileAt(nx, ny) == 0 then
-        -- CHECK FOR INTERACTIVE ITEMS BEFORE MOVING
+        -- CHECK FOR INTERACTIVE ITEMS
         local items = state.items
         for i, it in ipairs(items) do
             if it.x == nx and it.y == ny then
                 if it.type == "scattered_document" or it.type == "terminal" then
-                    -- Trigger interaction
                     game.state = "interacting"
                     game.interaction = {
                         active = true,
@@ -125,7 +184,16 @@ function M.tryMove(dx, dy)
                         content = it.content,
                         isCorrupted = it.isCorrupted
                     }
-                    return -- Do not move player, do not end turn yet
+                    return 
+                elseif it.type == "scrap" then
+                    game.state = "interacting_scrap"
+                    game.interaction = {
+                        active = true,
+                        type = "scrap",
+                        itemIndex = i,
+                        options = M.generateScrapOptions()
+                    }
+                    return
                 end
             end
         end
@@ -173,7 +241,6 @@ function M.tryMove(dx, dy)
                     state.elevator.revealed = true
                     table.remove(items, i)
                 end
-                -- Note: terminal/documents are not removed here, handled in resolveInteraction
             end
         end
 
@@ -271,10 +338,15 @@ function M.resetGame()
     player.kills = 0; player.critBonus = 5
     player.seen = {}
     player.keycards = 0
+    
+    player.hasBackpack = false
+    player.hasSword = false
+    player.hasScrapArmor = false
+    player.scrapCount = 0
 
     util.addMessage("Arrows: move/attack. M: medkit. Escape Mars alive.", 180, 180, 220)
     util.addMessage("Don't lose your mind. Don't say the word.", 200, 60, 80)
     M.newFloor()
 end
 
-return M
+return M 

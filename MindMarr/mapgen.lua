@@ -178,7 +178,7 @@ function M.populateFloor(rooms)
     for i = 2, #rooms do
         local room = rooms[i]
         
-        -- Scattered Documents (Random floor)
+        -- Scattered Documents
         if rand() < 0.25 then
             local txt, corr = getContent()
             items[#items+1] = {
@@ -192,7 +192,6 @@ function M.populateFloor(rooms)
         end
 
         -- Terminals (North Walls Only)
-        -- We scan the room for floor tiles where y-1 is a wall
         local possibleTerminals = {}
         for y = room.y, room.y + room.h - 1 do
             for x = room.x, room.x + room.w - 1 do
@@ -212,6 +211,16 @@ function M.populateFloor(rooms)
                 spriteKey = "terminal",
                 content = txt,
                 isCorrupted = corr
+            }
+        end
+        
+        -- Scrap (New)
+        if rand() < 0.3 then
+             items[#items+1] = {
+                x = rand(room.x, room.x + room.w - 1),
+                y = rand(room.y, room.y + room.h - 1),
+                type = "scrap",
+                spriteKey = "scrap",
             }
         end
 
@@ -260,4 +269,4 @@ function M.populateFloor(rooms)
     end
 end
 
-return M
+return M 
